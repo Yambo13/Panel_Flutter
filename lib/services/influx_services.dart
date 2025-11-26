@@ -34,6 +34,9 @@ class InfluxService {
       final records = await recordStream.toList();
 
       if (records.isNotEmpty) {
+
+        final valor = records.first['_value'];
+        print("Dato recibido para $sensorTopic ($field): $valor");
         return records.first['_value'] as double?;
       }
     } catch (e) {
