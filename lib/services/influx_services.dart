@@ -1,10 +1,14 @@
 import 'package:influxdb_client/api.dart';
+import 'package:fl_chart/fl_chart.dart';
+
+
+
 
 class InfluxService {
   final String url = "http://31.222.232.41:8086";
-  final String token = "KIGmOo_ggh-I0s4tbQJKLVCDEJmYDYRJxs_1O5BiCADZd1VabysX1wNUtdoKMk4SSqB6RW2WAjWfAwJ-GkfhAw==";
+  final String token = "ZYAEkWP65qrA9q9EDgxlgX56BOUBcAZ0f8VkuA1hBfK6eijwmMbIrm26Bwj-x7ZENLvkbODqWJsfXFqmp33chg==";
   final String org = "qartia";
-  final String bucket = "AgroNext-UPCT";
+  final String bucket = "Engine-UPCT";
 
   late InfluxDBClient client;
 
@@ -45,5 +49,60 @@ class InfluxService {
 
     return null;
   }
+
+//Obtiene el historial de un campo especifico para las gráficas
+Future<List<FlSpot>> getHistoryData(String measurement, String field, String filterTag, String filterValue) async {
+    try {
+      final queryService = client.getQueryService();
+
+      //Consulta: Última hora (-1h) o último día (-1d). Ajusta según necesidad 
+      final query = '''
+        from(bucket: "$bucket")
+          |> range(start: -1h)
+          |> filter(fn: (r) => r["_measurement"] == "$measurement")
+          |> filter(fn: (r) => r["$filterTag"] == "$filterValue")
+          |> filter(fn: (r) => r["_field"] == "$field")
+          |> limit(n: 100)
+      ''';
+
+      final recordStream = await queryService.query(query);
+      final records = await recordStream.toList();
+
+      List<FlSpot> spots = [];
+      //Convierto los registros de InfluxDB a puntos X,Y
+      for (var i = 0; i < records.length; i++) {
+        final rawValue = records[i]['_value'];
+        double? finalValue;
+        //intento de conexión a bruto
+        if (rawValue is num) {
+          finalValue = rawValue.toDouble();
+        } else if (rawValue is String) {
+          finalValue = double.tryParse(rawValue);
+        }
+
+        //Si obtengo un numero válido lo añado a la lista de puntos
+        if (finalValue != null) {
+          spots.add(FlSpot(i.toDouble(), finalValue));
+        }else {
+          print("⚠️ Valor no numérico ignorado en el historial: $rawValue (Tipo: ${rawValue.runtimeType})");
+        }
+          
+
+        
+      }
+
+      //LOG para verificar los puntos obtenidos
+      print("Datos para $filterValue ($field): ${spots.length} puntos.");
+      return spots;
+
+    } catch (e) {
+      print("❌ Error al obtener historial para $e");
+      return []; //Si falla devuñelve lista vacía
+    }
+
+  }
+
+
+
 
 }

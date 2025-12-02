@@ -5,25 +5,7 @@ import 'package:agro/models/sensor_data.dart';
 import 'package:agro/ui/widgets/sensor_card.dart';
 import 'package:agro/ui/screens/login_screen.dart';
 import 'package:agro/ui/screens/dashboard_screen.dart';
-/*
-class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
 
-  @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
-}
-
-class _DashboardScreenState extends State<DashboardScreen> {
-  @override
-  Widget build(BuildContext context) {
-    // Simple placeholder UI for the dashboard; replace with your actual implementation.
-    return Scaffold(
-      appBar: AppBar(title: const Text("Dashboard")),
-      body: const Center(child: Text("Dashboard content goes here")),
-    );
-  }
-}
-*/
 
 
 
@@ -81,11 +63,16 @@ class _LoginScreenState extends State<LoginScreen>{
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.agriculture, size: 100, color: Colors.blue),
+              Image.asset(
+                'assets/qartia_full_logo.jpg',
+                width: 250,
+                height: 250,
+                fit: BoxFit.contain,
+              ),
               const SizedBox(height: 20),
               const Text( 
-                "Bienvenido a AgroNext",
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                "Bienvenido a Qartia Visual Sensor Dashboard",
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic),
               ),
               const SizedBox(height: 40),
 

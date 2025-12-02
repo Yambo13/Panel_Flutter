@@ -1,4 +1,5 @@
 // lib/ui/screens/dashboard_screen.dart
+import 'package:agro/models/sensor_data.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart'; // Importamos la librería de gráficas
 import 'package:agro/services/influx_services.dart';
@@ -30,26 +31,63 @@ class SensorDetailScreen extends StatelessWidget {
 
             // 2. LAS 4 GRÁFICAS SOLICITADAS
             // Cada una es independiente y tiene su propia alarma
-            const _SensorChartCard(
-              title: "Frequency Spectrum",
-              lineColor: Colors.purple,
-              yAxisLabel: "Magnitud (dB)",
-              maxX: 100, // Eje X hasta 100 Hz
+            _MultiSensorChartCard(
+              title: "Frontal Sushi Sensor - Radial Bearing Peak Acceleration",
+              yAxisLabel: "mm/s",
+              //Config de conexion
+              measurement: "cartagena-engine",
+              filterTag: "topic",  //Topic = sensor_rodamiento_frontal
+              sensorId: sensorData['topic_id'] ?? sensorData['id'],
+
+              //Los 3 campos a mostrar
+              fieldNames: const [
+                'object_X_Axis_PV_Acceleration',
+                'object_Y_Axis_PV_Acceleration',
+                'object_Z_Axis_PV_Acceleration1'
+              ],
+
+              //Colores para cada línea
+              lineColors: const [
+                Colors.blue,
+                Colors.green,
+                Colors.orange,
+              ],
+
+              //Leyenda
+              legendLabels: const ["Eje X", "Eje Y", "Eje Z"],
+            ),  
+            _SensorChartCard(
+              title: "Time Value Payload Sensor",
+              lineColor: Colors.green,
+              yAxisLabel: "Velocidad (mm/s)",
+              measurement: "upct-it2-engine",
+              fieldName: 'time_value_payload',
+              filterTag: "id",
+              sensorId: "12648430",
             ),
-            const _SensorChartCard(
+            _SensorChartCard(
               title: "Peak Velocity Sensor",
               lineColor: Colors.green,
               yAxisLabel: "Velocidad (mm/s)",
+              sensorId: sensorData['topic_id'] ?? '',
+              measurement: '',
+              fieldName: 'fPort',
             ),
-            const _SensorChartCard(
+            _SensorChartCard(
               title: "Radial Bearing RMS Velocity",
               lineColor: Colors.orange,
               yAxisLabel: "Velocidad RMS (mm/s)",
+              sensorId: sensorData['id'] ?? '',
+              measurement: '',
+              fieldName: '',
             ),
-            const _SensorChartCard(
+            _SensorChartCard(
               title: "Radial Bearing Peak Acceleration",
               lineColor: Colors.redAccent,
               yAxisLabel: "Aceleración (G)",
+              sensorId: sensorData['id'] ?? '',
+              measurement: '',
+              fieldName: '',
             ),
           ],
         ),
@@ -88,20 +126,27 @@ class SensorDetailScreen extends StatelessWidget {
 // Incluye la gráfica y su configuración de alarma propia
 // ---------------------------------------------------------------------------
 class _SensorChartCard extends StatefulWidget {
+
   final String title;
-  final Color lineColor;
+  final Color  lineColor;
   final String yAxisLabel;
   final double maxX;
 
   final String sensorId;
-  final String fieldName;
+  final String measurement;
+  final String fieldName;  //Nombre del campo en influxDB
+  final String filterTag; //Etiqueta para filtrar (por defecto topic)
 
 
   const _SensorChartCard({
     required this.title,
     required this.lineColor,
     required this.yAxisLabel,
-    this.maxX = 10, // Por defecto 10 unidades de tiempo/muestra
+    required this.sensorId,
+    required this.measurement,
+    required this.fieldName,
+    this.filterTag = "topic",
+    this.maxX = 60, // Por defecto 60 min
   });
 
   @override
@@ -110,89 +155,92 @@ class _SensorChartCard extends StatefulWidget {
 
 class _SensorChartCardState extends State<_SensorChartCard> {
   double _alarmThreshold = 8.0; // Valor inicial de la alarma para esta gráfica
-  late List<FlSpot> _dummyData;
+  final InfluxService _influxService = InfluxService(); //Instance de servicio InfluxDB
 
-  @override
-  void initState() {
-    super.initState();
-    _dummyData = _generateRandomData();
-  }
-
-  // Generador de datos falsos para visualizar la gráfica ahora
-  List<FlSpot> _generateRandomData() {
-    final Random random = Random();
-    return List.generate(11, (index) {
-      double yVal = random.nextDouble() * 10; // Valor entre 0 y 10
-      return FlSpot(index * (widget.maxX / 10), yVal);
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
     return Card(
       elevation: 3,
       margin: const EdgeInsets.only(bottom: 20),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Título de la Gráfica
             Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             Text(widget.yAxisLabel, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            
-            const SizedBox(height: 20),
+            const SizedBox(height: 5),
 
             // GRÁFICA (fl_chart)
             SizedBox(
-              height: 200,
-              child: LineChart(
-                LineChartData(
-                  minY: 0,
-                  maxY: 12, // Un poco más que el max random (10) para margen
-                  minX: 0,
-                  maxX: widget.maxX,
-                  // LÍNEA DE ALARMA (Horizontal roja)
-                  extraLinesData: ExtraLinesData(
-                    horizontalLines: [
-                      HorizontalLine(
-                        y: _alarmThreshold,
-                        color: Colors.red.withOpacity(0.8),
-                        strokeWidth: 2,
-                        dashArray: [5, 5], // Línea punteada
-                        label: HorizontalLineLabel(
-                          show: true,
-                          alignment: Alignment.topRight,
-                          style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 10),
-                          labelResolver: (line) => "Límite: ${line.y.toStringAsFixed(1)}",
+              height: 250,
+              child: FutureBuilder<List<FlSpot>>(
+                future: _influxService.getHistoryData(widget.measurement, widget.fieldName, widget.filterTag, widget.sensorId),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  } else if (snapshot.hasError) {
+                    return Center(child: Text("Error al cargar datos: ${snapshot.error}"));
+                  } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return const Center(child: Text("No hay datos disponibles"));
+                  }
+                  //Si hay datos, construyo la gráfica
+                  final dataPoints = snapshot.data!;
+
+                  //Calculo el maximo X para ajustar la vista
+                  final currentMaxX = dataPoints.isNotEmpty ? dataPoints.last.x : widget.maxX;
+
+                  return LineChart(
+                    LineChartData(
+                      minY: 0,
+                      //maxY automatico o con margen da igual
+                      minX: 0,
+                      maxX: currentMaxX,
+                      extraLinesData: ExtraLinesData(
+                        horizontalLines: [
+                          HorizontalLine(
+                            y: _alarmThreshold,
+                            color: Colors.redAccent,
+                            strokeWidth: 2,
+                            dashArray: [5, 5],
+                            label: HorizontalLineLabel(
+                              show: true,
+                              alignment: Alignment.centerRight,
+                              style: TextStyle(color: Colors.red[800], fontWeight: FontWeight.bold),
+                              labelResolver: (line) => 'Alarma: ${_alarmThreshold.toStringAsFixed(1)}',
+                            ),
+                          ),
+                        ],
+                      ),
+                      gridData: const FlGridData (show: true, drawVerticalLine: false),
+                      titlesData: const FlTitlesData(
+                        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
+                        bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 30)),
+                      ),
+                      borderData: FlBorderData(show: true, border: Border.all(color: Colors.grey.shade300)),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: dataPoints, //datos reales
+                          isCurved: true,
+                          color: widget.lineColor,
+                          barWidth: 3,
+                          dotData: const FlDotData(show: false),
+                          belowBarData: BarAreaData(show:true, color: widget.lineColor.withOpacity(0.2)),
                         ),
-                      ),
-                    ],
-                  ),
-                  gridData: const FlGridData(show: true, drawVerticalLine: false),
-                  titlesData: const FlTitlesData(
-                    topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  ),
-                  borderData: FlBorderData(show: true, border: Border.all(color: Colors.grey.shade300)),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: _dummyData,
-                      isCurved: true,
-                      color: widget.lineColor,
-                      barWidth: 3,
-                      dotData: const FlDotData(show: false),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: widget.lineColor.withOpacity(0.2), // Relleno suave debajo
-                      ),
+                      ],
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
 
+
+            //SLider de la alarma
             const SizedBox(height: 15),
             const Divider(),
 
@@ -211,7 +259,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                     value: _alarmThreshold,
                     min: 0,
                     max: 12,
-                    divisions: 24,
+                    divisions: 48,
                     activeColor: Colors.redAccent,
                     label: _alarmThreshold.toStringAsFixed(1),
                     onChanged: (value) {
@@ -222,7 +270,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.red[50],
                     borderRadius: BorderRadius.circular(8),
@@ -261,4 +309,141 @@ class _InfoColumn extends StatelessWidget {
       ],
     );
   }
+}
+
+//Widget para manejar multiples lineas en una gráfica 
+class _MultiSensorChartCard extends StatefulWidget {
+  final String title;
+  final String yAxisLabel;
+  final double maxX;
+
+  final String sensorId;
+  final String measurement;
+  final String filterTag;
+
+  //Acepto lista en lugar de solo string
+
+  final List<String> fieldNames;  //Nombres de los campos en influxDB
+  final List<Color> lineColors; //Colores para cada línea
+  final List<String> legendLabels; //Etiquetas para la leyenda
+
+  const _MultiSensorChartCard({
+    required this.title,
+    required this.yAxisLabel,
+    required this.sensorId,
+    required this.measurement,
+    required this.fieldNames,
+    required this.lineColors,
+    required this.legendLabels,
+    required this.filterTag,
+    this.maxX = 60, // Por defecto 60 min
+  });
+
+  @override
+  State<_MultiSensorChartCard> createState() => _MultiSensorChartCardState();
+}
+
+class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
+  final InfluxService _influxService = InfluxService(); //Instance de servicio InfluxDB
+
+  //Función para cargar datos de múltiples campos
+  Future<List<List<FlSpot>>> _fetchAllData() async {
+    //Future.wait para pedir los 3 campos a la vez
+    return await Future.wait(widget.fieldNames.map((field) =>  
+        _influxService.getHistoryData(
+          widget.measurement,
+          field,
+          widget.filterTag,
+          widget.sensorId,
+        )
+      )
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 3,
+      margin: const EdgeInsets.only(bottom: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+
+            Wrap(
+              spacing: 12,
+              children: List.generate(widget.legendLabels.length, (index) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      color: widget.lineColors[index]),
+                      const SizedBox(width: 4),
+                      Text(widget.legendLabels[index], style: const TextStyle(fontSize: 12)),
+                  ],
+                );
+              }),
+            ),
+            
+            const SizedBox(height: 20),
+
+            SizedBox(
+              height: 250,
+              child: FutureBuilder<List<List<FlSpot>>>(
+                future: _fetchAllData(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  } else if (snapshot.hasError) {
+                    return Center(child: Text("Error al cargar datos: ${snapshot.error}"));
+                  } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return const Center(child: Text("No hay datos disponibles"));
+                  }
+                  //Si hay datos, construyo la gráfica
+                  final allDataPoints = snapshot.data!;
+
+                  //Calculo el maximo X para ajustar la vista
+                  double currentMaxX = widget.maxX;
+                  for (var list in allDataPoints) {
+                    if (list.isNotEmpty && list.last.x > currentMaxX) currentMaxX = list.last.x;
+                  }
+                  return LineChart(
+                    LineChartData(
+                      minY: 0,
+                      //maxY automatico o con margen da igual
+                      minX: 0,
+                      maxX: currentMaxX,
+                      gridData: const FlGridData (show: true, drawVerticalLine: false),
+                      titlesData: const FlTitlesData(
+                        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
+                        bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 30)),
+                      ),
+                      borderData: FlBorderData(show: true, border: Border.all(color: Colors.grey.shade300)),
+                      lineBarsData: List.generate(allDataPoints.length, (index) {
+                        return LineChartBarData(
+                          spots: allDataPoints[index], //datos reales
+                          isCurved: true,
+                          color: widget.lineColors[index],
+                          barWidth: 3,
+                          dotData: const FlDotData(show: false),
+                          belowBarData: BarAreaData(show:true, color: widget.lineColors[index].withOpacity(0.2)),
+                        );
+                      }),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+}
 }
