@@ -21,8 +21,8 @@ class _DashboardScreenState extends State<DashboardScreen>{
       "nombre": "Moto-Bomba Norte",
       "estado": "Activa",
       "sensores": [
-        {"id": "Sensor_motorIT2_1", "topic_id": "sensor_rodamiento_frontal", "tipo": "Rodamiento","val": 0.0 },
-        {"id": "Sensor_motorIT2_2", "temperatura": 24.0, "humedad": 50.0, "luminosidad": 320.0, "bateria": 80.0},
+        {"id": "Sensor Rodamiento Frontal - Velocidad", "topic_id": "sensor_rodamiento_frontal_000064fffea38e01", "tipo": "Rodamiento","val": 0.0 },
+        {"id": "Sensor_motorIT2_2", "topic_id": "ss", "humedad": 50.0, "luminosidad": 320.0, "bateria": 80.0},
         {"id": "Sensor_bomba_1", "temperatura": 23.5, "humedad": 45.0, "luminosidad": 300.0, "bateria": 85.0},
         {"id": "Sensor_bomba_2", "temperatura": 24.0, "humedad": 50.0, "luminosidad": 320.0, "bateria": 80.0},
       ]

@@ -1,9 +1,25 @@
 // lib/ui/screens/dashboard_screen.dart
+
+
+// // lib/ui/screens/dashboard_screen.dart
 import 'package:agro/models/sensor_data.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart'; // Importamos la librería de gráficas
 import 'package:agro/services/influx_services.dart';
 import 'dart:math'; // Para generar datos aleatorios
+
+
+//Definicion de colores para las gráficas
+
+// const Color kChartPrimary = Color(0xFF00BFA5);
+// const Color kChartSecondary = Color(0xFF2979FF);
+// const Color kChartAccent = Color(0xFFEEEEEE);
+//  const Color kChartAccent = Color(0xFF9E9E9E);
+// const Color kChartAccent = Color(0xFFE53935);
+
+
+
+
 
 class SensorDetailScreen extends StatelessWidget {
   final Map<String, dynamic> sensorData;
@@ -33,7 +49,7 @@ class SensorDetailScreen extends StatelessWidget {
             // Cada una es independiente y tiene su propia alarma
             _MultiSensorChartCard(
               title: "Frontal Sushi Sensor - Radial Bearing Peak Acceleration",
-              yAxisLabel: "mm/s",
+              yAxisLabel: "mm/s²",
               //Config de conexion
               measurement: "cartagena-engine",
               filterTag: "topic",  //Topic = sensor_rodamiento_frontal
@@ -65,29 +81,30 @@ class SensorDetailScreen extends StatelessWidget {
               filterTag: "id",
               sensorId: "12648430",
             ),
-            _SensorChartCard(
-              title: "Peak Velocity Sensor",
-              lineColor: Colors.green,
-              yAxisLabel: "Velocidad (mm/s)",
-              sensorId: sensorData['topic_id'] ?? '',
-              measurement: '',
-              fieldName: 'fPort',
-            ),
-            _SensorChartCard(
+            _MultiSensorChartCard(
               title: "Radial Bearing RMS Velocity",
-              lineColor: Colors.orange,
               yAxisLabel: "Velocidad RMS (mm/s)",
-              sensorId: sensorData['id'] ?? '',
-              measurement: '',
-              fieldName: '',
-            ),
-            _SensorChartCard(
-              title: "Radial Bearing Peak Acceleration",
-              lineColor: Colors.redAccent,
-              yAxisLabel: "Aceleración (G)",
-              sensorId: sensorData['id'] ?? '',
-              measurement: '',
-              fieldName: '',
+
+              //config de conexion
+              measurement: "cartagena-engine",
+              filterTag: "topic",  //Topic = sensor_rodamiento_frontal
+              sensorId: sensorData['topic_id'] ?? sensorData['id'],
+
+              //Los 3 campos a mostrar
+              fieldNames: const [
+                'object_X_Axis_PV_Velocity',
+                'object_Y_Axis_PV_Velocity',
+                'object_Z_Axis_PV_Velocity1'
+              ],
+              //Colores para cada línea
+              lineColors: const [
+                Colors.purple,
+                Colors.orange,
+                Colors.teal,
+              ],
+
+              //Leyenda
+              legendLabels: const ["Eje X", "Eje Y", "Eje Z"],
             ),
           ],
         ),
@@ -196,7 +213,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                   return LineChart(
                     LineChartData(
                       minY: 0,
-                      //maxY automatico o con margen da igual
+                      maxY: dataPoints.map((e) => e.y).reduce(max) * 1.2, // Máximo Y con margen
                       minX: 0,
                       maxX: currentMaxX,
                       extraLinesData: ExtraLinesData(
@@ -230,7 +247,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                           color: widget.lineColor,
                           barWidth: 3,
                           dotData: const FlDotData(show: false),
-                          belowBarData: BarAreaData(show:true, color: widget.lineColor.withOpacity(0.2)),
+                          belowBarData: BarAreaData(show:true, color: widget.lineColor),
                         ),
                       ],
                     ),
@@ -433,7 +450,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                           color: widget.lineColors[index],
                           barWidth: 3,
                           dotData: const FlDotData(show: false),
-                          belowBarData: BarAreaData(show:true, color: widget.lineColors[index].withOpacity(0.2)),
+                          belowBarData: BarAreaData(show:true, color: widget.lineColors[index]),
                         );
                       }),
                     ),
