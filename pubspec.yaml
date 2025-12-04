@@ -36,6 +36,10 @@ dependencies:
   latlong2: ^0.9.1
   cupertino_icons: ^1.0.8
   fl_chart: ^1.1.1
+  webview_flutter: ^4.7.0
+  webview_flutter_web: ^0.2.3+4
+  url_launcher: ^6.3.2
+ # webview_windows: ^0.4.0
 
 dev_dependencies:
   flutter_test:

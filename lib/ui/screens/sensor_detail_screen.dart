@@ -6,7 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart'; // Importamos la librería de gráficas
 import 'package:agro/services/influx_services.dart';
 import 'dart:async';  //Para el timer
-
+import 'package:agro/ui/screens/web_chart_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 //Definicion de colores para las gráficas
 
@@ -15,7 +16,6 @@ const Color kChartSecondary = Color(0xFF2979FF);
 const Color kGridLineColor = Color(0xFFEEEEEE);
 const Color kAxisTextColor = Color(0xFF9E9E9E);
 const Color kAlarmColor = Color(0xFFE53935);
-
 
 
 
@@ -39,6 +39,35 @@ class SensorDetailScreen extends StatelessWidget {
           children: [
             // 1. Tarjeta de Resumen (Datos actuales estáticos)
             _buildSummaryCard(),
+
+            const SizedBox(height: 16),
+            
+            // BOTÓN PARA ABRIR LA WEB EXTERNA
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  // URL de la Gráfica 
+                  final Uri url = Uri.parse("https://mqtt.qartia.com/frequencyGraphic2.html");
+
+                  //Intento abrirla en navegador externo 
+                  if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("No se pudo abrir el navegador")),
+                    );
+                  }
+                  
+                },
+                icon: const Icon(Icons.public, color: Colors.white),
+                label: const Text("Ver Gráfica Web Avanzada (Qartia)", 
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo, // Color distintivo
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
             
             const SizedBox(height: 24),
             const Text("Análisis de Vibraciones y Espectro", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
@@ -134,6 +163,7 @@ class SensorDetailScreen extends StatelessWidget {
       ),
     );
   }
+
 }
 
 // ---------------------------------------------------------------------------
