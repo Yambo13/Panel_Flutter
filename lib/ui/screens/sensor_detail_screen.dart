@@ -404,8 +404,8 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                       child: Slider(
                         value: _alarmThreshold,
                         min: 0,
-                        max: 200, // Ajustado a un rango más realista
-                        divisions: 50,
+                        max: 300, // Ajustado a un rango más realista
+                        divisions: 100,
                         activeColor: kAlarmColor,
                         onChanged: (v) => setState(() => _alarmThreshold = v),
                       ),
@@ -487,173 +487,254 @@ class _MultiSensorChartCard extends StatefulWidget {
 }
 
 class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
-  final InfluxService _influxService = InfluxService(); //Instance de servicio InfluxDB
-  double _alarmThreshold = 5.0; 
+  final InfluxService _influxService = InfluxService();
+  
+  // 1. ESTADO
+  double _alarmThreshold = 5.0;
+  List<List<FlSpot>> _allSpots = [[], [], []]; // Lista de listas (una por cada línea)
+  bool _isLoading = true;
+  Timer? _timer;
 
-  //Función para cargar datos de múltiples campos
-  Future<List<List<FlSpot>>> _fetchAllData() async {
-    //Future.wait para pedir los 3 campos a la vez
-    return await Future.wait(widget.fieldNames.map((field) =>  
-        _influxService.getHistoryData(
-          widget.measurement,
-          field,
-          widget.filterTag,
-          widget.sensorId,
+  @override
+  void initState() {
+    super.initState();
+    // 2. INICIAR CARGA Y TEMPORIZADOR
+    _fetchAllData();
+    _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      _fetchAllData();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel(); // Limpieza al salir
+    super.dispose();
+  }
+
+  // 3. CARGA DE DATOS EN PARALELO
+  Future<void> _fetchAllData() async {
+    try {
+      final results = await Future.wait(
+        widget.fieldNames.map((field) => 
+          _influxService.getHistoryData(
+            widget.measurement, 
+            field, 
+            widget.filterTag, 
+            widget.sensorId
+          )
         )
-      )
-    );
+      );
+
+      if (mounted) {
+        setState(() {
+          _allSpots = results;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print("Error cargando multi-chart: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 4. CÁLCULO DE EJES DINÁMICOS (Max X y Max Y)
+    double currentMaxX = widget.maxX;
+    double currentMaxY = 0;
+
+    // Buscamos el valor más alto en todas las líneas
+    for (var list in _allSpots) {
+      if (list.isNotEmpty) {
+        if (list.last.x > currentMaxX) currentMaxX = list.last.x;
+        for (var spot in list) {
+          if (spot.y > currentMaxY) currentMaxY = spot.y;
+        }
+      }
+    }
+
+    // Ajuste con la alarma y margen superior ("aire")
+    if (_alarmThreshold > currentMaxY) currentMaxY = _alarmThreshold;
+    double finalMaxY = (currentMaxY * 1.2);
+    if (finalMaxY == 0) finalMaxY = 10; // Mínimo por defecto
+
     return Card(
       elevation: 0,
+      color: Colors.white,
       margin: const EdgeInsets.only(bottom: 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey.shade100)),
+        side: BorderSide(color: Colors.grey.shade100),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            // Cabecera con Título y Estado
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                _isLoading 
+                  ? const SizedBox(height: 12, width: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                      child: const Text("LIVE", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
+                    ),
+              ],
+            ),
+            
             const SizedBox(height: 8),
+            
+            // Leyenda de colores
             Wrap(
               spacing: 12,
               children: List.generate(widget.legendLabels.length, (index) {
                 return Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      color: widget.lineColors[index]),
-                      const SizedBox(width: 4),
-                      Text(widget.legendLabels[index], style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Container(width: 10, height: 10, decoration: BoxDecoration(color: widget.lineColors[index], shape: BoxShape.circle)),
+                    const SizedBox(width: 4),
+                    Text(widget.legendLabels[index], style: const TextStyle(fontSize: 12, color: Colors.grey)),
                   ],
                 );
               }),
             ),
             
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
 
+            // GRÁFICA
             SizedBox(
               height: 250,
-              child: FutureBuilder<List<List<FlSpot>>>(
-                future: _fetchAllData(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-                  } else if (!snapshot.hasData || snapshot.data!.every((l) => l.isEmpty)) {
-                    return const Center(child: Text("Sin datos para mostrar"));
-                  }
-
-                  final allSpots = snapshot.data!;
-                  
-                  // 1. CÁLCULO DINÁMICO DE EJES
-                  double currentMaxX = widget.maxX;
-                  double currentMaxY = 0;
-
-                  for (var list in allSpots) {
-                    if (list.isNotEmpty) {
-                      // Revisar X
-                      if (list.last.x > currentMaxX) currentMaxX = list.last.x;
-                      
-                      // Revisar Y (Buscar el pico más alto en esta línea)
-                      for (var spot in list) {
-                        if (spot.y > currentMaxY) currentMaxY = spot.y;
-                      }
-                    }
-                  }
-
-                  // 2. LÓGICA DE MARGEN Y ALARMA
-                  // Si la alarma es más alta que los datos, usamos la alarma como techo
-                  if (_alarmThreshold > currentMaxY) currentMaxY = _alarmThreshold;
-
-                  // Añadimos un 20% de "aire" arriba para que no quede pegado
-                  // Si todo es 0, forzamos un mínimo de 10 para que no se rompa la gráfica
-                  double finalMaxY = (currentMaxY * 1.2);
-                  if (finalMaxY == 0) finalMaxY = 10; 
-
-                  return LineChart(
+              child: _allSpots.every((l) => l.isEmpty) && !_isLoading
+                  ? Center(child: Text("Esperando datos...", style: TextStyle(color: kAxisTextColor)))
+                  : LineChart(
                     LineChartData(
                       minY: 0,
                       minX: 0,
                       maxX: currentMaxX,
-                      maxY: finalMaxY, // <--- 3. APLICAMOS EL LÍMITE CALCULADO
+                      maxY: finalMaxY, // <--- Aplicamos el Y dinámico calculado
                       
+                      // Interactividad (Tooltip que muestra 3 valores si se superponen)
+                      lineTouchData: LineTouchData(
+                        handleBuiltInTouches: true,
+                        touchTooltipData: LineTouchTooltipData(
+                          getTooltipItems: (List<LineBarSpot> touchedBarSpots) {
+                            return touchedBarSpots.map((barSpot) {
+                              return LineTooltipItem(
+                                '${widget.legendLabels[barSpot.barIndex]}: ${barSpot.y.toStringAsFixed(2)}\n',
+                                TextStyle(color: widget.lineColors[barSpot.barIndex], fontWeight: FontWeight.bold),
+                              );
+                            }).toList();
+                          },
+                        ),
+                      ),
+
+                      // Línea de Alarma
                       extraLinesData: ExtraLinesData(
                         horizontalLines: [
                           HorizontalLine(
                             y: _alarmThreshold,
-                            color: Colors.red.withOpacity(0.6),
+                            color: kAlarmColor.withOpacity(0.6),
                             strokeWidth: 1.5,
                             dashArray: [6, 2],
                             label: HorizontalLineLabel(
                               show: true,
                               alignment: Alignment.topRight,
-                              style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 10),
+                              style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold, fontSize: 10),
                               labelResolver: (line) => "Límite: ${line.y.toStringAsFixed(1)}",
                             ),
                           ),
                         ],
                       ),
 
-                      gridData: FlGridData (
+                      gridData: FlGridData(
                         show: true, 
                         drawVerticalLine: false,
-                        horizontalInterval: _alarmThreshold > 0 ? _alarmThreshold: 5,
-                        getDrawingHorizontalLine: (value) => FlLine(color: Colors.grey.shade200, strokeWidth: 1),
-                        ),
-                      titlesData: const FlTitlesData(
+                        horizontalInterval: finalMaxY / 5, // Intervalos dinámicos según la altura
+                        getDrawingHorizontalLine: (value) => FlLine(color: kGridLineColor, strokeWidth: 0.5, dashArray: [4, 4]),
+                      ),
+                      
+                      titlesData: FlTitlesData(
                         topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
                         rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
-                        bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 30)),
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 30,
+                            getTitlesWidget: (value, meta) {
+                                if (value == 0 || value >= finalMaxY) return const SizedBox.shrink();
+                                return Text(value.toStringAsFixed(1), style: TextStyle(color: kAxisTextColor, fontSize: 10));
+                            },
+                          ),
+                        ),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            interval: currentMaxX / 5,
+                            getTitlesWidget: (value, meta) {
+                               return Padding(
+                                 padding: const EdgeInsets.only(top: 6.0),
+                                 child: Text("${value.toInt()}m", style: TextStyle(color: kAxisTextColor, fontSize: 10)),
+                               );
+                            },
+                          ),
+                        ),
                       ),
-                      borderData: FlBorderData(show: false ),
-
-                      lineBarsData: List.generate(allSpots.length, (index) {
+                      
+                      borderData: FlBorderData(show: false),
+                      
+                      // Generación de las 3 líneas
+                      lineBarsData: List.generate(_allSpots.length, (index) {
                         return LineChartBarData(
-                          spots: allSpots[index], //datos reales
+                          spots: _allSpots[index], // Datos en vivo
                           isCurved: true,
+                          curveSmoothness: 0.3,
                           color: widget.lineColors[index],
                           barWidth: 2,
                           dotData: const FlDotData(show: false),
-                          belowBarData: BarAreaData(show:false),
+                          belowBarData: BarAreaData(show: false),
                         );
                       }),
                     ),
-                  );
-                },
-              ),
+                  ),
             ),
 
             const SizedBox(height: 20),
             const Divider(),
 
-            //Alado el slider
+            // SLIDER DE ALARMA
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: Row(
                 children: [
-                  const Icon(Icons.notifications_active, color: Colors.redAccent, size: 20),
+                  Icon(Icons.notifications_active, color: kAlarmColor.withOpacity(0.8), size: 20),
                   const SizedBox(width: 12),
                   const Text("Alarma:", style: TextStyle(fontWeight: FontWeight.w600)),
                   Expanded(
-                    child: Slider(
-                      value: _alarmThreshold,
-                      min: 0,
-                      max: 20, // Ajusta este máximo según la magnitud de tus datos (vibración suele ser baja)
-                      divisions: 40,
-                      activeColor: Colors.redAccent,
-                      onChanged: (v) => setState(() => _alarmThreshold = v),
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: kAlarmColor,
+                        thumbColor: kAlarmColor,
+                        inactiveTrackColor: kAlarmColor.withOpacity(0.2),
+                        trackHeight: 3.0,
+                        overlayColor: kAlarmColor.withOpacity(0.1),
+                      ),
+                      child: Slider(
+                        value: _alarmThreshold,
+                        min: 0,
+                        // El slider también se adapta al máximo de la gráfica si los datos suben mucho
+                        max: (finalMaxY > 25) ? finalMaxY : 25, 
+                        divisions: 100,
+                        onChanged: (v) => setState(() => _alarmThreshold = v),
+                      ),
                     ),
                   ),
-                  Text(
-                    _alarmThreshold.toStringAsFixed(1),
-                    style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: kAlarmColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                    child: Text(_alarmThreshold.toStringAsFixed(1), style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -662,5 +743,5 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
         ),
       ),
     );
-}
+  }
 }
