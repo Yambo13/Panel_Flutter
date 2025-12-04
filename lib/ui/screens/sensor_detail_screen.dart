@@ -2,11 +2,10 @@
 
 
 // // lib/ui/screens/dashboard_screen.dart
-import 'package:agro/models/sensor_data.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart'; // Importamos la librería de gráficas
 import 'package:agro/services/influx_services.dart';
-import 'dart:math'; // Para generar datos aleatorios
+import 'dart:async';  //Para el timer
 
 
 //Definicion de colores para las gráficas
@@ -155,6 +154,7 @@ class _SensorChartCard extends StatefulWidget {
 
 
   const _SensorChartCard({
+    Key? key,
     required this.title,
     required this.lineColor,
     required this.yAxisLabel,
@@ -163,7 +163,7 @@ class _SensorChartCard extends StatefulWidget {
     required this.fieldName,
     this.filterTag = "topic",
     this.maxX = 60, // Por defecto 60 min
-  });
+  }) : super(key: key);
 
   @override
   State<_SensorChartCard> createState() => _SensorChartCardState();
@@ -173,18 +173,54 @@ class _SensorChartCardState extends State<_SensorChartCard> {
   double _alarmThreshold = 8.0; // Valor inicial de la alarma para esta gráfica
   final InfluxService _influxService = InfluxService(); //Instance de servicio InfluxDB
 
-  // Método para cargar los datos históricos del sensor
-  Future<List<FlSpot>> _fetchAllData() async {
-    return await _influxService.getHistoryData(
-      widget.measurement,
-      widget.fieldName,
-      widget.filterTag,
-      widget.sensorId,
+  // Variables de estado
+  List<FlSpot> _spots = [];
+  bool _isLoading = true;
+  Timer? _timer;
+  
+  @override
+  void initState() {
+    super.initState();
+    // Cargo los datos y programo el reloj 
+    _fetchData();
+
+    //COnfigura cada cuanto quieres actualizar (ej:2 segundos)
+    _timer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      _fetchData();
+    });
+  }
+
+  @override
+  void dispose() {
+    // ·. Limpieza: Matar al reloj cuando salimos de la pantalla (Importante)
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  //$ Fucnión de carga
+  Future<void> _fetchData() async {
+    //Pido los datos a la base
+    final data = await _influxService.getHistoryData(
+      widget.measurement, 
+      widget.fieldName, 
+      widget.filterTag, 
+      widget.sensorId
     );
+
+    //Si el widget sigue vivo (el usuario no se ha ido), actualizamos 
+    if (mounted) {
+      setState(() {
+        _spots = data;
+        _isLoading = false; //Ya tengo datos, esto quita el cargando
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    //Calculo el maximo X para que la gráfica avance sola
+    final currentMaxX = _spots.isNotEmpty ? _spots.last.x : widget.maxX;
+
     return Card(
       elevation: 0, // Quitamos elevación para un look más plano y limpio
       color: Colors.white,
@@ -203,7 +239,14 @@ class _SensorChartCardState extends State<_SensorChartCard> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.black87)),
-                Icon(Icons.insights, color: kChartPrimary.withOpacity(0.7), size: 20),
+                //Icono animado en vivo 
+                _isLoading
+                  ? const SizedBox(height: 10, width: 10, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                    child: const Text("Live", style: TextStyle(fontSize: 10, color: Colors.amberAccent, fontWeight: FontWeight.bold)),
+                  ),
               ],
             ),
             Text(widget.yAxisLabel, style: TextStyle(fontSize: 12, color: kAxisTextColor)),
@@ -211,165 +254,132 @@ class _SensorChartCardState extends State<_SensorChartCard> {
 
             SizedBox(
               height: 220, // Un poco más de altura
-              child: FutureBuilder<List<FlSpot>>(
-                future: _fetchAllData(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    // Cargador más sutil
-                    return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-                  } else if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
-                    return const Center(child: Text("Sin datos recientes", style: TextStyle(color: kAxisTextColor)));
-                  }
+              child: _spots.isEmpty && _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _spots.isEmpty
+                    ? Center(child: Text("Recibiendo datos....", style: TextStyle(color: kAxisTextColor))) 
+                    : LineChart(
+                        LineChartData(
+                          minY: 0,
+                          minX: 0,
+                          maxX: currentMaxX,
 
-                  final spots = snapshot.data!;
-                  double currentMaxX = widget.maxX;
-                  double currentMaxY = 0;
-
-                  if (spots.isNotEmpty) {
-                    for (var spot in spots) {
-                      // Revisar X
-                      if (spot.x > currentMaxX) currentMaxX = spot.x;
-                      
-                      // Revisar Y (Buscar el pico más alto en esta línea)
-                      if (spot.y > currentMaxY) currentMaxY = spot.y;
-                    }
-                  }
-
-                  // 2. LÓGICA DE MARGEN Y ALARMA
-                  // Si la alarma es más alta que los datos, usamos la alarma como techo
-                  if (_alarmThreshold > currentMaxY) currentMaxY = _alarmThreshold;
-
-                  // Añadimos un 20% de "aire" arriba para que no quede pegado
-                  // Si todo es 0, forzamos un mínimo de 10 para que no se rompa la gráfica
-                  double finalMaxY = (currentMaxY * 1.2);
-                  if (finalMaxY == 0) finalMaxY = 10;
-
-
-
-                  return LineChart(
-                    LineChartData(
-                      minY: 0,
-                      minX: 0,
-                      maxY: finalMaxY,
-                      maxX: currentMaxX,
-
-                      // 1. INTERACTIVIDAD (TOOLTIP) PROFESIONAL
-                      lineTouchData: LineTouchData(
-                        handleBuiltInTouches: true,
-                        touchTooltipData: LineTouchTooltipData(
-                          tooltipBorderRadius: BorderRadius.circular(8),
-                          getTooltipItems: (List<LineBarSpot> touchedBarSpots) {
-                            return touchedBarSpots.map((barSpot) {
-                              return LineTooltipItem(
-                                '${barSpot.y.toStringAsFixed(2)} ${widget.yAxisLabel}\n',
-                                const TextStyle(color: Colors.white, fontWeight: FontWeight.bold,),
-                                children: [
-                                  TextSpan(
-                                    text: 'Minuto ${barSpot.x.toInt()}',
-                                    style: TextStyle(color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.normal, fontSize: 10),
+                          // 1. INTERACTIVIDAD (TOOLTIP) PROFESIONAL
+                          lineTouchData: LineTouchData(
+                            handleBuiltInTouches: true,
+                            touchTooltipData: LineTouchTooltipData(
+                                tooltipBorderRadius: BorderRadius.circular(8),
+                                getTooltipItems: (List<LineBarSpot> touchedBarSpots) {
+                                    return touchedBarSpots.map((barSpot) {
+                                      return LineTooltipItem(
+                                        '${barSpot.y.toStringAsFixed(2)} ${widget.yAxisLabel}\n',
+                                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold,),
+                                          children: [
+                                            TextSpan(
+                                              text: 'Minuto ${barSpot.x.toInt()}',
+                                              style: TextStyle(color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.normal, fontSize: 10),
+                                            ),
+                                          ],
+                                        );
+                                      }).toList();
+                                    },
                                   ),
-                                ],
-                              );
-                            }).toList();
-                          },
-                        ),
-                      ),
-                      // 2. REJILLA SUTIL
-                      gridData: FlGridData(
-                        show: true,
-                        drawVerticalLine: false,
-                        horizontalInterval: _alarmThreshold > 0 ? _alarmThreshold / 2 : 5, // Intenta adaptar las líneas
-                        getDrawingHorizontalLine: (value) {
-                          return FlLine(
-                            color: kGridLineColor,
-                            strokeWidth: 0.5,
-                            dashArray: [4, 4], // Línea punteada sutil
-                          );
-                        },
-                      ),
-                      // 3. EJES LIMPIOS
-                      titlesData: FlTitlesData(
-                        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                        bottomTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            reservedSize: 22,
-                            interval: currentMaxX / 5, // Muestra unos 5 labels en el eje X
-                            getTitlesWidget: (value, meta) {
-                               if (value == 0 || value == currentMaxX) return const SizedBox.shrink();
-                               return Padding(
-                                 padding: const EdgeInsets.only(top: 6.0),
-                                 child: Text("${value.toInt()}m", style: TextStyle(color: kAxisTextColor, fontSize: 10)),
-                               );
-                            },
-                          ),
-                        ),
-                        leftTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            interval: _alarmThreshold > 0 ? _alarmThreshold / 2 : null, // Intenta adaptar los labels
-                            reservedSize: 30,
-                            getTitlesWidget: (value, meta) {
-                                if (value == 0) return const SizedBox.shrink();
-                                return Text(value.toStringAsFixed(1), style: TextStyle(color: kAxisTextColor, fontSize: 10), textAlign: TextAlign.right);
-                            },
-                          ),
-                        ),
-                      ),
-                      // 4. SIN BORDES NEGROS
-                      borderData: FlBorderData(show: false),
-                      // 5. LÍNEA DE ALARMA MEJORADA
-                      extraLinesData: ExtraLinesData(
-                        horizontalLines: [
-                          HorizontalLine(
-                            y: _alarmThreshold,
-                            color: kAlarmColor.withOpacity(0.6),
-                            strokeWidth: 1.5,
-                            dashArray: [6, 2],
-                            label: HorizontalLineLabel(
-                              show: true,
-                              alignment: Alignment.topRight,
-                              style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold, fontSize: 10),
-                              labelResolver: (line) => "Límite: ${line.y.toStringAsFixed(1)}",
-                            ),
-                          ),
-                        ],
-                      ),
-                      // 6. LÍNEA DE DATOS CON GRADIENTE Y RELLENO
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: spots,
-                          isCurved: true,
-                          curveSmoothness: 0.3, // Curva suave pero precisa
-                          // Usamos gradiente en lugar de color plano
-                          gradient: const LinearGradient(
-                            colors: [kChartPrimary, kChartSecondary],
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                          ),
-                          barWidth: 2.5, // Línea más fina y elegante
-                          isStrokeCapRound: true,
-                          dotData: FlDotData(show: false), // Sin puntos, solo línea limpia
-                          belowBarData: BarAreaData(
+                                ),
+                          // 2. REJILLA SUTIL
+                          gridData: FlGridData(
                             show: true,
-                            // Gradiente vertical de relleno que se desvanece
-                            gradient: LinearGradient(
-                              colors: [
-                                kChartPrimary.withOpacity(0.3),
-                                kChartSecondary.withOpacity(0.05),
-                              ],
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
+                            drawVerticalLine: false,
+                            horizontalInterval: _alarmThreshold > 0 ? _alarmThreshold / 2 : 5, // Intenta adaptar las líneas
+                            getDrawingHorizontalLine: (value) {
+                              return FlLine(
+                                color: kGridLineColor,
+                                strokeWidth: 0.5,
+                                dashArray: [4, 4], // Línea punteada sutil
+                              );
+                            },
+                          ),
+                          // 3. EJES LIMPIOS
+                          titlesData: FlTitlesData(
+                            topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                            rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                            bottomTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                reservedSize: 22,
+                                interval: currentMaxX / 5, // Muestra unos 5 labels en el eje X
+                                getTitlesWidget: (value, meta) {
+                                  if (value == 0 || value == currentMaxX) return const SizedBox.shrink();
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 6.0),
+                                    child: Text("${value.toInt()}m", style: TextStyle(color: kAxisTextColor, fontSize: 10)),
+                                  );
+                                },
+                              ),
+                            ),
+                            leftTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                interval: _alarmThreshold > 0 ? _alarmThreshold / 2 : null, // Intenta adaptar los labels
+                                reservedSize: 30,
+                                getTitlesWidget: (value, meta) {
+                                    if (value == 0) return const SizedBox.shrink();
+                                    return Text(value.toStringAsFixed(1), style: TextStyle(color: kAxisTextColor, fontSize: 10), textAlign: TextAlign.right);
+                                },
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                          // 4. SIN BORDES NEGROS
+                          borderData: FlBorderData(show: false),
+                      // 5. LÍNEA DE ALARMA MEJORADA
+                          extraLinesData: ExtraLinesData(
+                            horizontalLines: [
+                              HorizontalLine(
+                                y: _alarmThreshold,
+                                color: kAlarmColor.withOpacity(0.6),
+                                strokeWidth: 1.5,
+                                dashArray: [6, 2],
+                                label: HorizontalLineLabel(
+                                  show: true,
+                                  alignment: Alignment.topRight,
+                                  style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold, fontSize: 10),
+                                  labelResolver: (line) => "Límite: ${line.y.toStringAsFixed(1)}",
+                                ),
+                              ),
+                            ],
+                          ),
+                          // 6. LÍNEA DE DATOS CON GRADIENTE Y RELLENO
+                          lineBarsData: [
+                            LineChartBarData(
+                              spots: _spots,
+                              isCurved: true,
+                              curveSmoothness: 0, // Curva suave pero precisa
+                              // Usamos gradiente en lugar de color plano
+                              gradient: const LinearGradient(
+                                colors: [kChartPrimary, kChartSecondary],
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                              ),
+                              barWidth: 2.5, // Línea más fina y elegante
+                              isStrokeCapRound: true,
+                              dotData: FlDotData(show: false), // Sin puntos, solo línea limpia
+                              belowBarData: BarAreaData(
+                                show: false,
+                                // Gradiente vertical de relleno que se desvanece
+                                gradient: LinearGradient(
+                                  colors: [
+                                    kChartPrimary.withOpacity(0.3),
+                                    kChartSecondary.withOpacity(0.05),
+                                  ],
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                ),
+                              ),
+                            ),
+                          ],
                     ),
-                  );
-                },
+                  ),
+            
               ),
-            ),
             
             const SizedBox(height: 20),
             const Divider(),
@@ -396,6 +406,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                         min: 0,
                         max: 200, // Ajustado a un rango más realista
                         divisions: 50,
+                        activeColor: kAlarmColor,
                         onChanged: (v) => setState(() => _alarmThreshold = v),
                       ),
                     ),
