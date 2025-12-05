@@ -652,6 +652,8 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
     double finalMaxY = (currentMaxY * 1.5);
     if (finalMaxY == 0) finalMaxY = 2; // Mínimo por defecto
 
+    double gridInterval = finalMaxY / 10;
+
     return Card(
       elevation: 3,
       color: Colors.white,
@@ -778,7 +780,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                       gridData: FlGridData(
                         show: true, 
                         drawVerticalLine: true,
-                        horizontalInterval: finalMaxY, // Intervalos dinámicos según la altura
+                        horizontalInterval: gridInterval, // Intervalos dinámicos según la altura
                         getDrawingHorizontalLine: (value) => FlLine(
                           color: Colors.grey.shade400, 
                           strokeWidth: 1,
@@ -854,7 +856,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                   Expanded(
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: kAlarmColor,
+                        activeTrackColor: const Color.fromARGB(255, 179, 15, 12),
                         thumbColor: kAlarmColor,
                         inactiveTrackColor: kAlarmColor,
                         trackHeight: 3.0,
@@ -864,7 +866,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                         value: _alarmThreshold,
                         min: 0,
                         // El slider también se adapta al máximo de la gráfica si los datos suben mucho
-                        max: (finalMaxY > 25) ? finalMaxY : 25, 
+                        max: 2.5, 
                         divisions: 100,
                         onChanged: (v) => setState(() => _alarmThreshold = v),
                       ),
@@ -872,7 +874,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: kAlarmColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                    decoration: BoxDecoration(color: kAlarmColor, borderRadius: BorderRadius.circular(6)),
                     child: Text(_alarmThreshold.toStringAsFixed(1), style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold)),
                   ),
                 ],
