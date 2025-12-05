@@ -59,7 +59,7 @@ class SensorDetailScreen extends StatelessWidget {
                   
                 },
                 icon: const Icon(Icons.public, color: Colors.white),
-                label: const Text("Ver Gráfica Web Avanzada (Qartia)", 
+                label: const Text("Espectro de frecuencias del motor ", 
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.indigo, // Color distintivo
@@ -126,12 +126,14 @@ class SensorDetailScreen extends StatelessWidget {
             ),
             _SensorChartCard(
               title: "Peak Velocity Sensor",
-              lineColor: Colors.green,
+              lineColor: Colors.blue,
               yAxisLabel: "Velocidad (mm/s)",
               measurement: "upct-it2-engine",
               fieldName: 'time_value_payload',
               filterTag: "id",
               sensorId: "12648430",
+              lineColors: const [Colors.blue],
+              legendLabels: const ["Velocidad"],
             )
           ],
         ),
@@ -139,6 +141,7 @@ class SensorDetailScreen extends StatelessWidget {
     );
   }
 
+//Barra de Resumen de arriba que muestra brevemenete unos valores 
   Widget _buildSummaryCard() {
     return Card(
       elevation: 4,
@@ -168,8 +171,6 @@ class SensorDetailScreen extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 // WIDGET REUTILIZABLE PARA CADA GRÁFICA
-// Incluye la gráfica y su configuración de alarma propia
-// ---------------------------------------------------------------------------
 class _SensorChartCard extends StatefulWidget {
 
   final String title;
@@ -181,6 +182,8 @@ class _SensorChartCard extends StatefulWidget {
   final String measurement;
   final String fieldName;  //Nombre del campo en influxDB
   final String filterTag; //Etiqueta para filtrar (por defecto topic)
+  final List<Color> lineColors; //Colores para cada línea
+  final List<String> legendLabels; //Etiquetas para la leyenda
 
 
   const _SensorChartCard({
@@ -191,6 +194,8 @@ class _SensorChartCard extends StatefulWidget {
     required this.sensorId,
     required this.measurement,
     required this.fieldName,
+    required this.lineColors,
+    required this.legendLabels,
     this.filterTag = "topic",
     this.maxX = 60, // Por defecto 60 min
   }) : super(key: key);
@@ -200,7 +205,7 @@ class _SensorChartCard extends StatefulWidget {
 }
 
 class _SensorChartCardState extends State<_SensorChartCard> {
-  double _alarmThreshold = 8.0; // Valor inicial de la alarma para esta gráfica
+  double _alarmThreshold = 0; // Valor inicial de la alarma para esta gráfica
   final InfluxService _influxService = InfluxService(); //Instance de servicio InfluxDB
 
   // Variables de estado
@@ -214,7 +219,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
     // Cargo los datos y programo el reloj 
     _fetchData();
 
-    //COnfigura cada cuanto quieres actualizar (ej:2 segundos)
+    //COnfigura cada cuanto quieres actualizar, en este caso cada 2 segundos
     _timer = Timer.periodic(const Duration(seconds: 2), (timer) {
       _fetchData();
     });
@@ -250,11 +255,29 @@ class _SensorChartCardState extends State<_SensorChartCard> {
   Widget build(BuildContext context) {
     //Calculo el maximo X para que la gráfica avance sola
     final currentMaxX = _spots.isNotEmpty ? _spots.last.x : widget.maxX;
+    double dataMaxY = 0; //Maximo encontrado en los datos 
+
+    //Busco el pico mas alto en los datos reales 
+    for (var spot in _spots) {
+      if (spot.y > dataMaxY) dataMaxY = spot.y;
+    }
+    // 2. LÓGICA DE ESTABILIDAD
+    // Definimos una altura mínima estándar (ej: 20) para que la gráfica no baile
+    // Si los datos superan esa altura, la gráfica crece. Si no, se queda fija en 20.
+    // YA NO usamos _alarmThreshold para calcular esto.
+    const double minStandardHeight = 20.0; 
+    
+    double finalMaxY = dataMaxY * 2.5; // Margen del 20% sobre los datos
+    if (finalMaxY < minStandardHeight) finalMaxY = minStandardHeight;
+
+    // Calculamos el intervalo de la rejilla una sola vez basado en esa altura fija
+    double gridInterval = finalMaxY / 10;
+
 
     return Card(
-      elevation: 0, // Quitamos elevación para un look más plano y limpio
+      elevation: 3, // Quitamos elevación para un look más plano y limpio
       color: Colors.white,
-      margin: const EdgeInsets.only(bottom: 24),
+      margin: const EdgeInsets.only(bottom: 40),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: Colors.grey.shade100), // Borde muy sutil en la tarjeta
@@ -268,22 +291,35 @@ class _SensorChartCardState extends State<_SensorChartCard> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.black87)),
+                Expanded(child : Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.black87))),
                 //Icono animado en vivo 
                 _isLoading
                   ? const SizedBox(height: 10, width: 10, child: CircularProgressIndicator(strokeWidth: 2))
                   : Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-                    child: const Text("Live", style: TextStyle(fontSize: 10, color: Colors.amberAccent, fontWeight: FontWeight.bold)),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4)),
+                    child: const Text("Live", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
                   ),
               ],
             ),
-            Text(widget.yAxisLabel, style: TextStyle(fontSize: 12, color: kAxisTextColor)),
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 12,
+              children: List.generate(widget.legendLabels.length, (index) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(width: 10, height: 10, decoration: BoxDecoration(color: widget.lineColors[index], shape: BoxShape.circle)),
+                    const SizedBox(width: 4),
+                    Text(widget.legendLabels[index], style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                );
+              }),
+            ),
             const SizedBox(height: 24),
 
             SizedBox(
-              height: 220, // Un poco más de altura
+              height: 250, // Un poco más de altura
               child: _spots.isEmpty && _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _spots.isEmpty
@@ -293,6 +329,37 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                           minY: 0,
                           minX: 0,
                           maxX: currentMaxX,
+                          //Voy a fijar un maximo visual para que se vean las bandas de colores
+                          maxY: finalMaxY,
+
+                          //Fondo de colores 
+                          rangeAnnotations: RangeAnnotations(
+                            horizontalRangeAnnotations: [
+                              //Zona Verde (Segura): de 0 a 2
+                              HorizontalRangeAnnotation(
+                                y1:0,
+                                y2:140,
+                                color: Colors.green.shade100
+                              ),
+                              //Zona Amarilla: de 2 a 4
+                              HorizontalRangeAnnotation(
+                                y1: 140, 
+                                y2: 190,
+                                color: Colors.yellow.shade100
+                              ),
+                              HorizontalRangeAnnotation(
+                                y1: 190, 
+                                y2: 240,
+                                color: Colors.orange.shade100
+                              ),
+                              //Zona Roja
+                              HorizontalRangeAnnotation(
+                                y1: 240, 
+                                y2: 405,
+                                color: Colors.red.shade100
+                              ),
+                            ],
+                          ),
 
                           // 1. INTERACTIVIDAD (TOOLTIP) PROFESIONAL
                           lineTouchData: LineTouchData(
@@ -302,12 +369,12 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                                 getTooltipItems: (List<LineBarSpot> touchedBarSpots) {
                                     return touchedBarSpots.map((barSpot) {
                                       return LineTooltipItem(
-                                        '${barSpot.y.toStringAsFixed(2)} ${widget.yAxisLabel}\n',
-                                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold,),
-                                          children: [
+                                        '${widget.legendLabels[barSpot.barIndex]}: ${barSpot.y.toStringAsFixed(2)}\n',
+                                        TextStyle(color:widget.lineColors[barSpot.barIndex], fontWeight: FontWeight.bold,),
+                                        children: [
                                             TextSpan(
-                                              text: 'Minuto ${barSpot.x.toInt()}',
-                                              style: TextStyle(color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.normal, fontSize: 10),
+                                              //text: 'Minuto ${barSpot.x.toInt()}',
+                                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.normal, fontSize: 10),
                                             ),
                                           ],
                                         );
@@ -315,19 +382,26 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                                     },
                                   ),
                                 ),
-                          // 2. REJILLA SUTIL
+
+                                //Linea de alarma 
+                                
+
+
+                          // 2. REJILLA mas marcada 
                           gridData: FlGridData(
                             show: true,
-                            drawVerticalLine: false,
-                            horizontalInterval: _alarmThreshold > 0 ? _alarmThreshold / 2 : 5, // Intenta adaptar las líneas
-                            getDrawingHorizontalLine: (value) {
-                              return FlLine(
-                                color: kGridLineColor,
-                                strokeWidth: 0.5,
-                                dashArray: [4, 4], // Línea punteada sutil
-                              );
-                            },
+                            drawVerticalLine: true,
+                            horizontalInterval: gridInterval, // Intervalo calculado fijo
+                            getDrawingHorizontalLine: (value) => FlLine(
+                                color: Colors.grey.shade400,
+                                strokeWidth: 1, 
+                            ),
+                            getDrawingVerticalLine: (value) => FlLine(
+                                color: Colors.grey.shade400,
+                                strokeWidth: 1
+                            ),
                           ),
+                          
                           // 3. EJES LIMPIOS
                           titlesData: FlTitlesData(
                             topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -336,7 +410,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                               sideTitles: SideTitles(
                                 showTitles: true,
                                 reservedSize: 22,
-                                interval: currentMaxX / 5, // Muestra unos 5 labels en el eje X
+                                interval: currentMaxX / 20, // Muestra unos 20 labels en el eje X
                                 getTitlesWidget: (value, meta) {
                                   if (value == 0 || value == currentMaxX) return const SizedBox.shrink();
                                   return Padding(
@@ -349,7 +423,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                             leftTitles: AxisTitles(
                               sideTitles: SideTitles(
                                 showTitles: true,
-                                interval: _alarmThreshold > 0 ? _alarmThreshold / 2 : null, // Intenta adaptar los labels
+                                interval: dataMaxY /5, // Intenta adaptar los labels
                                 reservedSize: 30,
                                 getTitlesWidget: (value, meta) {
                                     if (value == 0) return const SizedBox.shrink();
@@ -359,57 +433,48 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                             ),
                           ),
                           // 4. SIN BORDES NEGROS
-                          borderData: FlBorderData(show: false),
-                      // 5. LÍNEA DE ALARMA MEJORADA
-                          extraLinesData: ExtraLinesData(
-                            horizontalLines: [
-                              HorizontalLine(
-                                y: _alarmThreshold,
-                                color: kAlarmColor.withOpacity(0.6),
-                                strokeWidth: 1.5,
-                                dashArray: [6, 2],
-                                label: HorizontalLineLabel(
-                                  show: true,
-                                  alignment: Alignment.topRight,
-                                  style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold, fontSize: 10),
-                                  labelResolver: (line) => "Límite: ${line.y.toStringAsFixed(1)}",
-                                ),
-                              ),
-                            ],
+                          borderData: FlBorderData(
+                            show: true,
+                            border: Border.all(color: Colors.grey.shade400)
                           ),
-                          // 6. LÍNEA DE DATOS CON GRADIENTE Y RELLENO
+                          // 5. LÍNEA DE ALARMA MEJORADA
+                          extraLinesData: ExtraLinesData(
+                                  horizontalLines: [
+                                    HorizontalLine(
+                                      y: _alarmThreshold,
+                                      color: Colors.red,
+                                      strokeWidth: 1.5, // Un poco más gruesa para verla bien
+                                      dashArray: [5, 5],
+                                      label: HorizontalLineLabel(
+                                        show: true,
+                                        alignment: Alignment.topRight,
+                                        style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 10),
+                                        labelResolver: (line) => "Límite: ${line.y.toStringAsFixed(1)}",
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                
+                          // 6. LÍNEA DE DATOS 
                           lineBarsData: [
                             LineChartBarData(
                               spots: _spots,
-                              isCurved: true,
-                              curveSmoothness: 0, // Curva suave pero precisa
+                              isCurved: false,
+                              //curveSmoothness: 0, // Curva suave pero precisa
                               // Usamos gradiente en lugar de color plano
-                              gradient: const LinearGradient(
-                                colors: [kChartPrimary, kChartSecondary],
-                                begin: Alignment.centerLeft,
-                                end: Alignment.centerRight,
-                              ),
-                              barWidth: 2.5, // Línea más fina y elegante
-                              isStrokeCapRound: true,
-                              dotData: FlDotData(show: false), // Sin puntos, solo línea limpia
-                              belowBarData: BarAreaData(
-                                show: false,
-                                // Gradiente vertical de relleno que se desvanece
-                                gradient: LinearGradient(
-                                  colors: [
-                                    kChartPrimary.withOpacity(0.3),
-                                    kChartSecondary.withOpacity(0.05),
-                                  ],
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                ),
-                              ),
+                             color: Colors.blue,
+                              barWidth: 2, // Línea más fina y elegante
+                              //isStrokeCapRound: true,
+                              dotData: const FlDotData(show: false), // Sin puntos, solo línea limpia
+                              belowBarData: BarAreaData(show: false),
+
                             ),
                           ],
-                    ),
+                        ),    
+                      )
                   ),
             
-              ),
+              
             
             const SizedBox(height: 20),
             const Divider(),
@@ -418,23 +483,23 @@ class _SensorChartCardState extends State<_SensorChartCard> {
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: Row(
                 children: [
-                  Icon(Icons.notifications_active, color: kAlarmColor.withOpacity(0.8), size: 20),
+                  Icon(Icons.notifications_active, color: kAlarmColor, size: 20),
                   const SizedBox(width: 12),
-                  Text("Alarma:", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey[800])),
+                  Text("Alarma", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey[800])),
                   Expanded(
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
                         activeTrackColor: kAlarmColor,
-                        inactiveTrackColor: kAlarmColor.withOpacity(0.2),
+                        inactiveTrackColor: kAlarmColor,
                         thumbColor: kAlarmColor,
-                        overlayColor: kAlarmColor.withOpacity(0.1),
+                        overlayColor: kAlarmColor,
                         trackHeight: 3.0,
                         thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0),
                       ),
                       child: Slider(
                         value: _alarmThreshold,
                         min: 0,
-                        max: 300, // Ajustado a un rango más realista
+                        max: finalMaxY, // Ajustado a un rango más realista
                         divisions: 100,
                         activeColor: kAlarmColor,
                         onChanged: (v) => setState(() => _alarmThreshold = v),
@@ -444,9 +509,9 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: kAlarmColor.withOpacity(0.1),
+                      color: Colors.red.shade100,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: kAlarmColor.withOpacity(0.3))
+                      border: Border.all(color: kAlarmColor)
                     ),
                     child: Text(
                       _alarmThreshold.toStringAsFixed(1),
@@ -520,7 +585,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
   final InfluxService _influxService = InfluxService();
   
   // 1. ESTADO
-  double _alarmThreshold = 5.0;
+  double _alarmThreshold = 0;
   List<List<FlSpot>> _allSpots = [[], [], []]; // Lista de listas (una por cada línea)
   bool _isLoading = true;
   Timer? _timer;
@@ -583,12 +648,12 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
     }
 
     // Ajuste con la alarma y margen superior ("aire")
-    if (_alarmThreshold > currentMaxY) currentMaxY = _alarmThreshold;
-    double finalMaxY = (currentMaxY * 1.2);
-    if (finalMaxY == 0) finalMaxY = 10; // Mínimo por defecto
+    //f (_alarmThreshold > currentMaxY) currentMaxY = _alarmThreshold;
+    double finalMaxY = (currentMaxY * 1.5);
+    if (finalMaxY == 0) finalMaxY = 2; // Mínimo por defecto
 
     return Card(
-      elevation: 0,
+      elevation: 3,
       color: Colors.white,
       margin: const EdgeInsets.only(bottom: 24),
       shape: RoundedRectangleBorder(
@@ -609,8 +674,8 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                   ? const SizedBox(height: 12, width: 12, child: CircularProgressIndicator(strokeWidth: 2))
                   : Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-                      child: const Text("LIVE", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4)),
+                      child: const Text("Live", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
                     ),
               ],
             ),
@@ -646,10 +711,41 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                       maxX: currentMaxX,
                       maxY: finalMaxY, // <--- Aplicamos el Y dinámico calculado
                       
+                      //Fondo de colores 
+                          rangeAnnotations: RangeAnnotations(
+                            horizontalRangeAnnotations: [
+                              //Zona Verde (Segura): de 0 a 2
+                              HorizontalRangeAnnotation(
+                                y1:0,
+                                y2:1,
+                                color: Colors.green.shade100
+                              ),
+                              //Zona Amarilla: de 2 a 4
+                              HorizontalRangeAnnotation(
+                                y1: 1, 
+                                y2: 1.5,
+                                color: Colors.yellow.shade100
+                              ),
+                              HorizontalRangeAnnotation(
+                                y1: 1.5, 
+                                y2: 2,
+                                color: Colors.orange.shade100
+                              ),
+                              //Zona Roja
+                              HorizontalRangeAnnotation(
+                                y1: 2, 
+                                y2: 2.5,
+                                color: Colors.red.shade100
+                              ),
+                            ],
+                          ),
+
+
                       // Interactividad (Tooltip que muestra 3 valores si se superponen)
                       lineTouchData: LineTouchData(
                         handleBuiltInTouches: true,
                         touchTooltipData: LineTouchTooltipData(
+                          tooltipBorderRadius: BorderRadius.circular(0),
                           getTooltipItems: (List<LineBarSpot> touchedBarSpots) {
                             return touchedBarSpots.map((barSpot) {
                               return LineTooltipItem(
@@ -668,7 +764,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                             y: _alarmThreshold,
                             color: kAlarmColor.withOpacity(0.6),
                             strokeWidth: 1.5,
-                            dashArray: [6, 2],
+                            dashArray: [5, 5],
                             label: HorizontalLineLabel(
                               show: true,
                               alignment: Alignment.topRight,
@@ -681,18 +777,25 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
 
                       gridData: FlGridData(
                         show: true, 
-                        drawVerticalLine: false,
-                        horizontalInterval: finalMaxY / 5, // Intervalos dinámicos según la altura
-                        getDrawingHorizontalLine: (value) => FlLine(color: kGridLineColor, strokeWidth: 0.5, dashArray: [4, 4]),
+                        drawVerticalLine: true,
+                        horizontalInterval: finalMaxY, // Intervalos dinámicos según la altura
+                        getDrawingHorizontalLine: (value) => FlLine(
+                          color: Colors.grey.shade400, 
+                          strokeWidth: 1,
+                        ), 
+                        getDrawingVerticalLine: (value) => FlLine(
+                          color: Colors.grey.shade400,
+                          strokeWidth: 1 
+                        ),
                       ),
-                      
+                      //Ejes limpios 
                       titlesData: FlTitlesData(
                         topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
                         rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
                         leftTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            reservedSize: 30,
+                            reservedSize: 22,
                             getTitlesWidget: (value, meta) {
                                 if (value == 0 || value >= finalMaxY) return const SizedBox.shrink();
                                 return Text(value.toStringAsFixed(1), style: TextStyle(color: kAxisTextColor, fontSize: 10));
@@ -713,20 +816,26 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                         ),
                       ),
                       
-                      borderData: FlBorderData(show: false),
-                      
-                      // Generación de las 3 líneas
+                      borderData: FlBorderData(
+                        show: false, 
+                        border: Border.all(color: Colors.grey.shade400)
+                      ),
+
+                
+
+                      //Generación de las 3 líneas
                       lineBarsData: List.generate(_allSpots.length, (index) {
                         return LineChartBarData(
                           spots: _allSpots[index], // Datos en vivo
-                          isCurved: true,
-                          curveSmoothness: 0.3,
+                          isCurved: false,
+                          curveSmoothness: 0,
                           color: widget.lineColors[index],
                           barWidth: 2,
                           dotData: const FlDotData(show: false),
                           belowBarData: BarAreaData(show: false),
                         );
-                      }),
+                      }
+                    ),
                     ),
                   ),
             ),
