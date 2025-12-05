@@ -856,9 +856,9 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                       data: SliderTheme.of(context).copyWith(
                         activeTrackColor: kAlarmColor,
                         thumbColor: kAlarmColor,
-                        inactiveTrackColor: kAlarmColor.withOpacity(0.2),
+                        inactiveTrackColor: kAlarmColor,
                         trackHeight: 3.0,
-                        overlayColor: kAlarmColor.withOpacity(0.1),
+                        overlayColor: kAlarmColor,
                       ),
                       child: Slider(
                         value: _alarmThreshold,
