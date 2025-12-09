@@ -338,24 +338,24 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                               //Zona Verde (Segura): de 0 a 2
                               HorizontalRangeAnnotation(
                                 y1:0,
-                                y2:140,
+                                y2:finalMaxY/3,
                                 color: Colors.green.shade100
                               ),
                               //Zona Amarilla: de 2 a 4
                               HorizontalRangeAnnotation(
-                                y1: 140, 
-                                y2: 190,
+                                y1: finalMaxY/3, 
+                                y2: finalMaxY/2,
                                 color: Colors.yellow.shade100
                               ),
                               HorizontalRangeAnnotation(
-                                y1: 190, 
-                                y2: 240,
+                                y1: finalMaxY/2, 
+                                y2: finalMaxY/1.5,
                                 color: Colors.orange.shade100
                               ),
                               //Zona Roja
                               HorizontalRangeAnnotation(
-                                y1: 240, 
-                                y2: 405,
+                                y1: finalMaxY/1.5, 
+                                y2: finalMaxY,
                                 color: Colors.red.shade100
                               ),
                             ],
@@ -490,7 +490,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
                         activeTrackColor: kAlarmColor,
-                        inactiveTrackColor: kAlarmColor,
+                        inactiveTrackColor: Colors.red.shade300,
                         thumbColor: kAlarmColor,
                         overlayColor: kAlarmColor,
                         trackHeight: 3.0,
@@ -719,24 +719,24 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                               //Zona Verde (Segura): de 0 a 2
                               HorizontalRangeAnnotation(
                                 y1:0,
-                                y2:1,
+                                y2:finalMaxY/3,
                                 color: Colors.green.shade100
                               ),
                               //Zona Amarilla: de 2 a 4
                               HorizontalRangeAnnotation(
-                                y1: 1, 
-                                y2: 1.5,
+                                y1: finalMaxY/3, 
+                                y2: finalMaxY/2,
                                 color: Colors.yellow.shade100
                               ),
                               HorizontalRangeAnnotation(
-                                y1: 1.5, 
-                                y2: 2,
+                                y1: finalMaxY/2, 
+                                y2: finalMaxY/1.5,
                                 color: Colors.orange.shade100
                               ),
                               //Zona Roja
                               HorizontalRangeAnnotation(
-                                y1: 2, 
-                                y2: 2.5,
+                                y1: finalMaxY/1.5, 
+                                y2: finalMaxY,
                                 color: Colors.red.shade100
                               ),
                             ],
@@ -764,13 +764,13 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                         horizontalLines: [
                           HorizontalLine(
                             y: _alarmThreshold,
-                            color: kAlarmColor.withOpacity(0.6),
+                            color: kAlarmColor,
                             strokeWidth: 1.5,
                             dashArray: [5, 5],
                             label: HorizontalLineLabel(
                               show: true,
                               alignment: Alignment.topRight,
-                              style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold, fontSize: 10),
+                              style: TextStyle(color: Colors.red.shade400, fontWeight: FontWeight.bold, fontSize: 10),
                               labelResolver: (line) => "Límite: ${line.y.toStringAsFixed(1)}",
                             ),
                           ),
@@ -850,15 +850,15 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: Row(
                 children: [
-                  Icon(Icons.notifications_active, color: kAlarmColor.withOpacity(0.8), size: 20),
+                  Icon(Icons.notifications_active, color: kAlarmColor, size: 20),
                   const SizedBox(width: 12),
-                  const Text("Alarma:", style: TextStyle(fontWeight: FontWeight.w600)),
+                  const Text("Alarma:", style: TextStyle(fontWeight: FontWeight.w600, color:  Colors.grey)),
                   Expanded(
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: const Color.fromARGB(255, 179, 15, 12),
+                        activeTrackColor: kAlarmColor,
                         thumbColor: kAlarmColor,
-                        inactiveTrackColor: kAlarmColor,
+                        inactiveTrackColor: Colors.red.shade300,
                         trackHeight: 3.0,
                         overlayColor: kAlarmColor,
                       ),
@@ -866,7 +866,7 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                         value: _alarmThreshold,
                         min: 0,
                         // El slider también se adapta al máximo de la gráfica si los datos suben mucho
-                        max: 2.5, 
+                        max: finalMaxY, 
                         divisions: 100,
                         onChanged: (v) => setState(() => _alarmThreshold = v),
                       ),
@@ -874,8 +874,13 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: kAlarmColor, borderRadius: BorderRadius.circular(6)),
-                    child: Text(_alarmThreshold.toStringAsFixed(1), style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold)),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade100, 
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: kAlarmColor)),
+                    child: Text(
+                      _alarmThreshold.toStringAsFixed(1), 
+                      style: TextStyle(color: kAlarmColor, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),

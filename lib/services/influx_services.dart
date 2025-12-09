@@ -58,7 +58,7 @@ Future<List<FlSpot>> getHistoryData(String measurement, String field, String fil
       //Consulta: Última hora (-1h) o último día (-1d). Ajusta según necesidad 
       final query = '''
         from(bucket: "$bucket")
-          |> range(start: -1h)
+          |> range(start: -1d)
           |> filter(fn: (r) => r["_measurement"] == "$measurement")
           |> filter(fn: (r) => r["$filterTag"] == "$filterValue")
           |> filter(fn: (r) => r["_field"] == "$field")
