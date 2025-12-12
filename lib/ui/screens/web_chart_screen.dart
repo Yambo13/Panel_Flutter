@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:flutter/foundation.dart'; //Para usar kisWeb
-import 'package:webview_flutter_web/webview_flutter_web.dart';
+//import 'package:flutter/foundation.dart'; //Para usar kisWeb
+//import 'package:webview_flutter_web/webview_flutter_web.dart';
 //import 'package:webview_windows/webview_windows.dart'; // Motor Windows
 
 class WebChartScreen extends StatefulWidget {

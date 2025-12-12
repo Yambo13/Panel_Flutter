@@ -15,8 +15,12 @@ class MyApp extends StatelessWidget {
       title: 'Sensor Dashboard',
       debugShowCheckedModeBanner: false, //esto es para quitar la etiqueta de debug
       theme: ThemeData( // Tema de la aplicación
-        primarySwatch: Colors.blue,
-        useMaterial3: true, 
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xFF1E88E5),
+        brightness: Brightness.light, 
+      ),
+      //Aquí se pueden personalizar ewstilos globales de texto o botones
       ),
       home: const LoginScreen(),
       // Pantalla de logeo 

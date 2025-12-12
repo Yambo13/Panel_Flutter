@@ -7,7 +7,9 @@ import 'package:fl_chart/fl_chart.dart'; // Importamos la librería de gráficas
 import 'package:agro/services/influx_services.dart';
 import 'dart:async';  //Para el timer
 import 'package:agro/ui/screens/web_chart_screen.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 
 //Definicion de colores para las gráficas
 
@@ -274,6 +276,26 @@ class _SensorChartCardState extends State<_SensorChartCard> {
     double gridInterval = finalMaxY / 10;
 
 
+      // 1. CÁLCULO DINÁMICO DE EJES X (TIEMPO)
+    double minXVal = 0;
+    double maxXVal = 0;
+    
+    if (_spots.isNotEmpty) {
+      // Ordenamos por seguridad, aunque Influx suele devolver ordenado
+      _spots.sort((a, b) => a.x.compareTo(b.x));
+      minXVal = _spots.first.x;
+      maxXVal = _spots.last.x;
+    } else {
+      // Si no hay datos, usamos el momento actual como referencia visual
+      double now = DateTime.now().millisecondsSinceEpoch.toDouble();
+      minXVal = now - (60 * 60 * 1000); // Hace 1 hora
+      maxXVal = now;
+    }
+
+    // Calculamos el intervalo para que siempre haya aprox 5 etiquetas de hora
+    double xInterval = (maxXVal - minXVal) / 5;
+    if (xInterval <= 0) xInterval = 1000; // Evitar división por cero
+
     return Card(
       elevation: 3, // Quitamos elevación para un look más plano y limpio
       color: Colors.white,
@@ -327,8 +349,8 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                     : LineChart(
                         LineChartData(
                           minY: 0,
-                          minX: 0,
-                          maxX: currentMaxX,
+                          minX: minXVal,
+                          maxX: maxXVal,
                           //Voy a fijar un maximo visual para que se vean las bandas de colores
                           maxY: finalMaxY,
 
@@ -409,13 +431,27 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                             bottomTitles: AxisTitles(
                               sideTitles: SideTitles(
                                 showTitles: true,
-                                reservedSize: 22,
-                                interval: currentMaxX / 20, // Muestra unos 20 labels en el eje X
-                                getTitlesWidget: (value, meta) {
-                                  if (value == 0 || value == currentMaxX) return const SizedBox.shrink();
+                                reservedSize: 30, // Espacio reservado para las etiquetas
+                                interval: xInterval, // Opcional: Para mostrar una etiqueta cada hora (3600000 ms)
+                                
+                                // ESTA ES LA FUNCIÓN MÁGICA
+                                getTitlesWidget: (double value, TitleMeta meta) {
+                                  
+                                  if (value < minXVal || value > maxXVal) return const SizedBox.shrink();
+
+                                  final date = DateTime.fromMillisecondsSinceEpoch(value.toInt());
+                                  final formattedDate = DateFormat('HH:mm:ss').format(date); // Agregué segundos por si el intervalo es corto
+                                  
                                   return Padding(
-                                    padding: const EdgeInsets.only(top: 6.0),
-                                    child: Text("${value.toInt()}m", style: TextStyle(color: kAxisTextColor, fontSize: 10)),
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Text(
+                                      formattedDate,
+                                      style: const TextStyle(
+                                        color: Colors.black,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10 // Texto un poco más pequeño para que quepa
+                                      ),
+                                    ),
                                   );
                                 },
                               ),
@@ -431,6 +467,8 @@ class _SensorChartCardState extends State<_SensorChartCard> {
                                 },
                               ),
                             ),
+
+                            
                           ),
                           // 4. SIN BORDES NEGROS
                           borderData: FlBorderData(
@@ -807,24 +845,32 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            interval: currentMaxX / 5,
-                            getTitlesWidget: (value, meta) {
-                               return Padding(
-                                 padding: const EdgeInsets.only(top: 6.0),
-                                 child: Text("${value.toInt()}m", style: TextStyle(color: kAxisTextColor, fontSize: 10)),
-                               );
-                            },
-                          ),
+                            reservedSize: 30, //Espacio reservado para las etiquetas
+                            interval: 3600000, //Mostrar etiqueta por cada hora
+                            getTitlesWidget: (double value, TitleMeta meta ) {
+                              //Convierto el numero enorme de double a entero
+                              final timestamp = value.toInt();
+                              //Lo convierto a fecha 
+                              final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+                              //Le doy el formato 
+                              final formattedDate = DateFormat('HH:mm').format(date);
+
+                              return Text(
+                                formattedDate,
+                                style: const TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12
+                                ),
+                              );
+                            }
+                          )
                         ),
                       ),
-                      
                       borderData: FlBorderData(
                         show: false, 
                         border: Border.all(color: Colors.grey.shade400)
                       ),
-
-                
-
                       //Generación de las 3 líneas
                       lineBarsData: List.generate(_allSpots.length, (index) {
                         return LineChartBarData(
@@ -838,8 +884,8 @@ class _MultiSensorChartCardState extends State<_MultiSensorChartCard> {
                         );
                       }
                     ),
-                    ),
                   ),
+                ),
             ),
 
             const SizedBox(height: 20),

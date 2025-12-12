@@ -5,7 +5,8 @@ import 'package:fl_chart/fl_chart.dart';
 
 
 class InfluxService {
-  final String url = "http://31.222.232.41:8086";
+  final String url = "/api/v2/query";
+  //final String url = "http://31.222.232.41:8086";
   final String token = "ZYAEkWP65qrA9q9EDgxlgX56BOUBcAZ0f8VkuA1hBfK6eijwmMbIrm26Bwj-x7ZENLvkbODqWJsfXFqmp33chg==";
   final String org = "qartia";
   final String bucket = "Engine-UPCT";
@@ -73,6 +74,8 @@ Future<List<FlSpot>> getHistoryData(String measurement, String field, String fil
       for (var i = 0; i < records.length; i++) {
         final rawValue = records[i]['_value'];
         double? finalValue;
+        final timeString = records[i]['_time'];
+        final date = DateTime.parse(timeString);
         //intento de conexión a bruto
         if (rawValue is num) {
           finalValue = rawValue.toDouble();
@@ -86,9 +89,6 @@ Future<List<FlSpot>> getHistoryData(String measurement, String field, String fil
         }else {
           print("⚠️ Valor no numérico ignorado en el historial: $rawValue (Tipo: ${rawValue.runtimeType})");
         }
-          
-
-        
       }
 
       //LOG para verificar los puntos obtenidos
