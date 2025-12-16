@@ -240,7 +240,7 @@ class _SensorChartCardState extends State<_SensorChartCard> {
     final data = await _influxService.getHistoryData(
       widget.measurement, 
       widget.fieldName, 
-      widget.filterTag, 
+      widget.filterTag,
       widget.sensorId
     );
 

@@ -34,13 +34,20 @@ dependencies:
   syncfusion_flutter_gauges: ^31.2.18
   flutter_map: ^8.2.2
   latlong2: ^0.9.1
-  cupertino_icons: ^1.0.8
   fl_chart: ^1.1.1
-  webview_flutter: ^4.7.0
+  #webview_flutter: ^4.7.0
   webview_flutter_web: ^0.2.3+4
   url_launcher: ^6.3.2
   intl: ^0.20.2
- # webview_windows: ^0.4.0
+ ##nuevos
+  http: ^1.4.0
+  logger: ^2.5.0
+  web_socket_channel: ^3.0.3
+  ##flutter_map: ^8.1.1
+  webview_flutter: ^4.11.0
+  flutter_map_cancellable_tile_provider: ^3.1.0
+  flutter_svg: ^2.1.0
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
