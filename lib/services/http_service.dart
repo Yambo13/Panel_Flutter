@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
 
-bool depu = false;
+bool depu = true;
 bool cacheDepu = false;
 
 /// Service to interact with InfluxDB using HTTP.
@@ -32,18 +32,19 @@ class HttpService {
   /// ```dart
   /// List<(double, double)> data = await httpService.fetchChartDataBetweenTimestamps(token, bucket, "temperatura", measurement, 1742152177232, 1742152182827);
   /// ```
-  Future<List<(double, double)>> fetchChartDataBetweenTimestamps(String token, String bucket, String field, String measurement, int startTimestamp, int endTimestamp, [String? topic, int? limit]) async {   // TODO: que un fetch use al otro
+  Future<List<(double, double)>> fetchChartDataBetweenTimestamps(String token, String bucket, String field, String measurement, int startTimestamp, int endTimestamp, String field2, [String? topic, int? limit]) async {   // TODO: que un fetch use al otro
     String cacheKey = '$bucket|$measurement|$field';
     if (topic != null && topic.isNotEmpty) {
       cacheKey += '|$topic';
     }
     
     // Intentar obtener datos del caché
-    var cachedData = _fetchCacheData(
+    /*var cachedData = _fetchCacheData(
       token,
       cacheKey, 
       startTimestamp.toDouble(), 
       endTimestamp.toDouble(),
+      field2,
       limit  // Pasar el límite al método _fetchCacheData
     );
 
@@ -51,13 +52,13 @@ class HttpService {
       return cachedData.entries
           .map((e) => (e.key, e.value))
           .toList();
-    }
+    }*/
 
     // Si no hay datos en caché, hacer la consulta
     if (cacheDepu) print("Cache miss. Fetching data from InfluxDB. Field: $cacheKey.");
     var newData = await _fetchFromInfluxDB(
       token, bucket, field, measurement, 
-      startTimestamp, endTimestamp, topic, limit
+      startTimestamp, endTimestamp,field2, topic, limit
     );
 
     // Actualizar el caché con los nuevos datos
@@ -66,7 +67,7 @@ class HttpService {
     return newData;
   }
 
-  Future<List<(double, double)>> _fetchFromInfluxDB(String token, String bucket, String field, String measurement, int startTimestamp, int endTimestamp, [String? topic, int? limit]) async {
+  Future<List<(double, double)>> _fetchFromInfluxDB(String token, String bucket, String field, String measurement, int startTimestamp, int endTimestamp, String field2, [String? topic, int? limit]) async {
     final uri = Uri.parse("$baseUrl/api/v2/query?orgID=a64aef386037d501");
 
     final headers = {
@@ -96,6 +97,16 @@ class HttpService {
           r._value / 1000.0
         }))
       ''',
+      "data_pres_volt": '''
+        |> map(fn:(r) => ({r with _value:
+          0.070307 * math.exp(x:(0.6459 + 2.0142 * math.log(x:r._value)))
+        }))
+      ''',
+      "data_temp_volt": '''
+        |> map(fn:(r) => ({r with _value:
+          -15.3606 * r._value + 150.0
+        }))
+      ''',
     };
 
     // Aplicamos transformaciones si hay algún campo que lo necesita
@@ -108,7 +119,7 @@ class HttpService {
       from(bucket: "$bucket")
         |> range(start: time(v: ${startTimestamp}000000), stop: time(v: ${endTimestamp}000000))
         |> filter(fn: (r) => r["_measurement"] == "$measurement")
-        |> filter(fn: (r) => r["_field"] == "$field")
+        |> filter(fn: (r) => r["_field"] == "$field" or r["_field"] == "$field2")
         $topicFilter
         $limitFilter
         |> aggregateWindow(every: 60s, fn: last, createEmpty: false)
@@ -221,7 +232,7 @@ class HttpService {
   /// ```dart
   /// Map<double, double> data = httpService.fetchCacheData("bucket1|measurement1|temperatura", 1742152177232, 1742152182827);
   /// ```
-  Map<double, double> _fetchCacheData(String token, String key, double startTimestamp, double endTimestamp, [int? limit]) {
+  Map<double, double> _fetchCacheData(String token, String key, double startTimestamp, double endTimestamp, String field2, [int? limit]) {
     // Verificar si el caché existe y no ha expirado
     if (!cache.containsKey(key) || 
         DateTime.now().difference(cacheTimestamps[key]!) > cacheExpiration) {
@@ -251,7 +262,7 @@ class HttpService {
     bool hasMissingDataAfter = cachedData.isNotEmpty && cachedData.lastKey()! < endTimestamp;
 
     if (hasMissingDataBefore || hasMissingDataAfter) {
-      _updateCacheRange(token, key, startTimestamp, endTimestamp);
+      _updateCacheRange(token, key, startTimestamp, endTimestamp, field2);
       return result;
     }
     
@@ -259,7 +270,7 @@ class HttpService {
     return result;
   }
 
-  Future<void> _updateCacheRange(String token, String key, double startTimestamp, double endTimestamp, [int? limit]) async {
+  Future<void> _updateCacheRange(String token, String key, double startTimestamp, double endTimestamp, String field2, [int? limit]) async {
     var parts = key.split('|');
     if (parts.length < 3) return;
 
@@ -284,6 +295,7 @@ class HttpService {
         measurement,
         startTimestamp.toInt(),
         firstCachedTime.toInt() - 1, // -1 para evitar solapamiento, TODO: revisar
+        field2,
         topic,
         limit                        // TODO: no sería limit, sería limit - lo que ya se tiene
       );
@@ -300,6 +312,7 @@ class HttpService {
         measurement,
         lastCachedTime.toInt() + 1, // +1 para evitar solapamiento, TODO: revisar 
         endTimestamp.toInt(),
+        field2,
         topic,
         limit                        // TODO: no sería limit, sería limit - lo que ya se tiene
       );
@@ -311,6 +324,7 @@ class HttpService {
       await _updateCache(key, newData);
     }
   }
+  
 
   Future<void> _updateCache(String key, List<(double, double)> newData) async {
     if (!cache.containsKey(key)) {
