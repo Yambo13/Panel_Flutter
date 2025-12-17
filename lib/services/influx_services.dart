@@ -1,120 +1,230 @@
 import 'dart:collection';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+
 import 'package:fl_chart/fl_chart.dart';
+import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
 
+/// Activa logs si necesitas depurar.
+const bool depu = true;
+const bool cacheDepu = true;
+
+/// Servicio HTTP para consultar InfluxDB (v2) desde Flutter (incluye Web).
 class InfluxService {
-  // Configuración
-  //final String baseUrl = "https://212.128.44.184";
-  //final String baseUrl = "https://31.222.232.41:8086"; // Asegúrate de que esta sea la IP correcta
-  final String baseUrl = "https://qartia.com"; // URL base de InfluxDB
-  final String token = "ZYAEkWP65qrA9q9EDgxlgX56BOUBcAZ0f8VkuA1hBfK6eijwmMbIrm26Bwj-x7ZENLvkbODqWJsfXFqmp33chg==";
-  final String orgId = "qartia"; // ID de la organización para la URL
-  final String bucket = "Engine-UPCT";
+  // ====== CONFIG ======
+  // OJO: baseUrl debe ser el ORIGEN que sirva Influx (o tu reverse proxy),
+  // SIN / al final. Ej: https://qartia.com  ó  https://31.222.232.41:8086
+  final String baseUrl;
+  final String token;
+  final String org; // org name o id (en el query param suele ser name)
+  final String bucket;
 
   final http.Client _client;
-  
-  // Sistema de Caché (Igual que http_service.dart)
-  final Duration cacheExpiration = const Duration(minutes: 5);
-  final Map<String, SplayTreeMap<double, double>> cache = {};
-  final Map<String, DateTime> cacheTimestamps = {};
-  
-  // Flag de depuración
-  final bool depu = true; 
 
-  InfluxService() : _client = http.Client();
+  // ====== CACHE ======
+  final Duration cacheExpiration;
+  final Map<String, SplayTreeMap<double, double>> _cache = {};
+  final Map<String, DateTime> _cacheTimestamps = {};
 
-  /// Obtiene el último valor de un sensor (Sin caché persistente, suele requerir dato real)
-  Future<double?> getLatestSensorData(String sensorTopic, String field) async {
-    final query = '''
-      from(bucket: "$bucket")
-        |> range(start: -1d)
-        |> filter(fn: (r) => r["_measurement"] == "agro-mqtt")
-        |> filter(fn: (r) => r["topic"] == "application/daddcdf1-2657-4f31-aa11-f1d412934550/device/$sensorTopic/event/up")
-        |> filter(fn: (r) => r["_field"] == "$field")
-        |> last()
-    ''';
+  InfluxService({
+    http.Client? client,
+    this.baseUrl = "https://qartia.com/paneles_flutter",
+    this.token =
+        "ZYAEkWP65qrA9q9EDgxlgX56BOUBcAZ0f8VkuA1hBfK6eijwmMbIrm26Bwj-x7ZENLvkbODqWJsfXFqmp33chg==",
+    this.org = "qartia",
+    this.bucket = "Engine-UPCT",
+    this.cacheExpiration = const Duration(minutes: 5),
+  }) : _client = client ?? http.Client();
 
+  /// Devuelve el último valor (double) de un campo para un topic/tag concreto.
+  ///
+  /// - measurement: ejemplo "cartagena-engine"
+  /// - field: ejemplo "object_temperature"
+  /// - filterTag: ejemplo "topic"
+  /// - sensorTopic: ejemplo "sensor_rodamiento_frontal"
+  Future<double?> getLatestSensorData({
+    required String measurement,
+    required String field,
+    required String filterTag,
+    required String sensorTopic,
+  }) async {
     try {
-      final results = await _executeQuery(query);
-      
+      final fluxQuery = _buildFluxQuery(
+        measurement: measurement,
+        field: field,
+        filterTag: filterTag,
+        filterValue: sensorTopic,
+        // último valor: buscamos “un rango razonable” y aplicamos last()
+        start: DateTime.now().subtract(const Duration(days: 7)),
+        stop: DateTime.now(),
+        aggregateEvery: null,
+        useLast: true,
+        limit: 1,
+      );
+
+      final results = await _executeQuery(
+        fluxQuery: fluxQuery,
+        cacheKey:
+            "LATEST|$bucket|$measurement|$field|$filterTag=$sensorTopic|1",
+        // forzamos no-cache para latest si te interesa siempre frescura:
+        bypassCache: true,
+      );
+
       if (results.isNotEmpty) {
-        // results es una lista de tuplas (timestamp, valor), tomamos el valor del último
-        final valor = results.last.$2;
-        if (depu) print("Dato recibido para $sensorTopic ($field): $valor");
-        return valor;
+        return results.last.$2;
       }
     } catch (e) {
-      Logger().e("❌ Error al consultar $sensorTopic ($field): $e");
+      Logger().e("❌ Error getLatestSensorData($measurement/$field): $e");
     }
     return null;
   }
 
-  /// Obtiene el historial para gráficas usando lógica HTTP + Caché
-  Future<List<FlSpot>> getHistoryData(String measurement, String field, String filterTag, String filterValue) async {
-    // Generamos una clave única para el caché
-    String cacheKey = '$bucket|$measurement|$field|$filterValue';
-
-    // Rango de tiempo: Simulamos -1d calculando timestamps (para que funcione la lógica de tu caché)
+  /// Historial para graficar (FlSpot) del último [hours] horas.
+  ///
+  /// Esto encaja con tu UI (FutureBuilder + LineChart).
+  Future<List<FlSpot>> getHistoryData(
+    String measurement,
+    String field,
+    String filterTag,
+    String sensorTopic, {
+    int hours = 24,
+    Duration aggregateEvery = const Duration(minutes: 1),
+    int? limit,
+  }) async {
     final now = DateTime.now();
-    final endTimestamp = now.millisecondsSinceEpoch;
-    final startTimestamp = now.subtract(const Duration(days: 1)).millisecondsSinceEpoch;
+    final start = now.subtract(Duration(hours: hours));
+    final stop = now;
 
-    // 1. Intentar obtener del caché
-    var cachedData = _fetchCacheData(
-      cacheKey, 
-      startTimestamp.toDouble(), 
-      endTimestamp.toDouble()
+    final fluxQuery = _buildFluxQuery(
+      measurement: measurement,
+      field: field,
+      filterTag: filterTag,
+      filterValue: sensorTopic,
+      start: start,
+      stop: stop,
+      aggregateEvery: aggregateEvery,
+      useLast: false,
+      limit: limit,
     );
 
-    if (cachedData.isNotEmpty) {
-      if (depu) print("Cache hit para $field");
-      return cachedData.entries
-          .map((e) => FlSpot(e.key, e.value)) // Convertimos a FlSpot
-          .toList();
-    }
+    final cacheKey =
+        "HIST|$bucket|$measurement|$field|$filterTag=$sensorTopic|${start.millisecondsSinceEpoch}|${stop.millisecondsSinceEpoch}|${aggregateEvery.inSeconds}|${limit ?? 0}";
 
-    // 2. Si no hay caché, construimos la consulta Flux
-    // Nota: Usamos aggregateWindow para no saturar la gráfica si hay muchos datos
-    final query = '''
-      from(bucket: "$bucket")
-        |> range(start: -1d)
-        |> filter(fn: (r) => r["_measurement"] == "$measurement")
-        |> filter(fn: (r) => r["$filterTag"] == "$filterValue")
-        |> filter(fn: (r) => r["_field"] == "$field")
-        |> aggregateWindow(every: 1h, fn: mean, createEmpty: false) 
-        |> yield(name: "mean")
-    ''';
+    final tuples = await _fetchBetweenTimestamps(
+      fluxQuery: fluxQuery,
+      cacheKey: cacheKey,
+      startTimestampMs: start.millisecondsSinceEpoch.toDouble(),
+      endTimestampMs: stop.millisecondsSinceEpoch.toDouble(),
+      limit: limit,
+    );
 
-    try {
-      // Ejecutar consulta HTTP
-      final newData = await _executeQuery(query);
-
-      // 3. Actualizar Caché
-      await _updateCache(cacheKey, newData);
-
-      // 4. Convertir a FlSpot para la UI
-      return newData.map((e) => FlSpot(e.$1, e.$2)).toList();
-
-    } catch (e) {
-      Logger().e("❌ Error al obtener historial para $measurement: $e");
-      return [];
-    }
+    // FlChart: x e y son double.
+    // x lo dejamos en ms epoch; si quieres “eje bonito”, conviertes luego.
+    return tuples.map((p) => FlSpot(p.$1, p.$2)).toList(growable: false);
   }
 
-  // -----------------------------------------------------------------------
-  // MÉTODOS PRIVADOS (Lógica extraída de http_service.dart)
-  // -----------------------------------------------------------------------
+  // =========================================================
+  // ===================== CORE HTTP =========================
+  // =========================================================
 
-  /// Realiza la petición HTTP raw a InfluxDB
-  Future<List<(double, double)>> _executeQuery(String fluxQuery) async {
-    final uri = Uri.parse("$baseUrl/paneles_flutter/api/v2/query?orgID=a64aef386037d501");
-    
-    final headers = {
+  String _buildFluxQuery({
+    required String measurement,
+    required String field,
+    required String filterTag,
+    required String filterValue,
+    required DateTime start,
+    required DateTime stop,
+    required Duration? aggregateEvery,
+    required bool useLast,
+    int? limit,
+  }) {
+    // Influx Flux time(v: <ns>)
+    final startNs = "${start.millisecondsSinceEpoch}000000";
+    final stopNs = "${stop.millisecondsSinceEpoch}000000";
+
+    final buf = StringBuffer()
+      ..writeln('from(bucket: "$bucket")')
+      ..writeln('  |> range(start: time(v: $startNs), stop: time(v: $stopNs))')
+      ..writeln('  |> filter(fn: (r) => r["_measurement"] == "$measurement")')
+      ..writeln('  |> filter(fn: (r) => r["_field"] == "$field")')
+      ..writeln('  |> filter(fn: (r) => r["$filterTag"] == "$filterValue")');
+
+    if (aggregateEvery != null) {
+      // last en ventanas para reducir puntos
+      buf.writeln(
+          '  |> aggregateWindow(every: ${aggregateEvery.inSeconds}s, fn: last, createEmpty: false)');
+    }
+
+    if (useLast) {
+      buf.writeln('  |> last()');
+    }
+
+    if (limit != null && limit > 0) {
+      buf.writeln('  |> limit(n: $limit)');
+    }
+
+    return buf.toString();
+  }
+
+  Future<List<(double, double)>> _fetchBetweenTimestamps({
+    required String fluxQuery,
+    required String cacheKey,
+    required double startTimestampMs,
+    required double endTimestampMs,
+    int? limit,
+  }) async {
+    // 1) intenta caché
+    final cached = _fetchCacheData(
+      key: cacheKey,
+      startTimestampMs: startTimestampMs,
+      endTimestampMs: endTimestampMs,
+      limit: limit,
+    );
+
+    if (cached.isNotEmpty) {
+      if (cacheDepu) {
+        Logger().i("✅ Cache HIT: $cacheKey (${cached.length} puntos)");
+      }
+      return cached.entries.map((e) => (e.key, e.value)).toList();
+    }
+
+    // 2) pega a Influx
+    final data = await _executeQuery(fluxQuery: fluxQuery, cacheKey: cacheKey);
+
+    // 3) guarda en caché
+    await _updateCache(cacheKey, data);
+
+    // 4) devuelve (ya filtrado por rango)
+    final filtered = _fetchCacheData(
+      key: cacheKey,
+      startTimestampMs: startTimestampMs,
+      endTimestampMs: endTimestampMs,
+      limit: limit,
+    );
+
+    return filtered.entries.map((e) => (e.key, e.value)).toList();
+  }
+
+  Future<List<(double, double)>> _executeQuery({
+    required String fluxQuery,
+    required String cacheKey,
+    bool bypassCache = false,
+  }) async {
+    // si no bypass: y el caché no está expirado, no hace falta consultar
+    if (!bypassCache && _cache.containsKey(cacheKey)) {
+      final ts = _cacheTimestamps[cacheKey];
+      if (ts != null && DateTime.now().difference(ts) < cacheExpiration) {
+        if (cacheDepu) Logger().i("✅ Cache válido (no HTTP): $cacheKey");
+        return _cache[cacheKey]!.entries.map((e) => (e.key, e.value)).toList();
+      }
+    }
+
+    final uri = Uri.parse("$baseUrl/api/v2/query?org=a64aef386037d501");
+
+    final headers = <String, String>{
       'Authorization': 'Token $token',
-      'Content-Type': 'application/json',
       'Accept': 'application/csv',
+      'Content-Type': 'application/json',
     };
 
     final body = jsonEncode({
@@ -123,106 +233,121 @@ class InfluxService {
       'dialect': {
         'header': true,
         'delimiter': ",",
-        'annotations': ['datatype', 'group', 'default']
+        'annotations': ['datatype', 'group', 'default'],
       }
     });
 
-    if (depu) print("Ejecutando Query HTTP...");
+    if (depu) {
+      Logger().i("➡️ POST $uri");
+      Logger().i("Flux:\n$fluxQuery");
+    }
+
     final response = await _client.post(uri, headers: headers, body: body);
 
     if (response.statusCode == 200) {
-      return _parseInfluxDBCsv(response.body);
+      final parsed = _parseInfluxDBCsv(response.body);
+      return parsed;
     } else {
-      throw Exception("Error HTTP ${response.statusCode}: ${response.body}");
+      throw Exception("Influx HTTP ${response.statusCode}: ${response.body}");
     }
   }
 
-  /// Parsea el CSV de InfluxDB manualmente (Igual que en http_service.dart)
+  /// Parse CSV anotado de Influx a pares (timestampMs, value).
   List<(double, double)> _parseInfluxDBCsv(String csvData) {
-    List<(double, double)> spots = [];
-    
-    List<String> lines = csvData.split('\n');
-    // Necesitamos al menos metadatos + header + 1 dato
-    if (lines.length <= 4) return spots; 
+    final spots = <(double, double)>[];
 
-    // Ignorar las primeras 3 líneas (annotations de tipo datos)
-    // Nota: A veces Influx devuelve 1 o 3 líneas de anotación dependiendo del dialecto.
-    // Asumimos el estándar del dialecto configurado en _executeQuery.
-    
-    // Buscamos la cabecera real (la que empieza por result,table,_start...)
-    int headerIndex = -1;
-    for(int i=0; i<lines.length; i++) {
-        if(lines[i].contains("_time") && lines[i].contains("_value")) {
-            headerIndex = i;
-            break;
-        }
+    final lines0 = csvData.split('\n');
+    if (lines0.length <= 4) return spots;
+
+    // Influx suele mandar 3 líneas de annotations antes del header real
+    var lines = lines0.sublist(3);
+    if (lines.isEmpty) return spots;
+
+    final header = lines[0].split(',');
+    final timeIndex = header.indexOf('_time');
+    final valueIndex = header.indexOf('_value');
+
+    if (timeIndex == -1 || valueIndex == -1) {
+      if (depu) Logger().e("CSV sin _time/_value en header: ${lines[0]}");
+      return spots;
     }
 
-    if (headerIndex == -1) return spots;
+    // saltamos header
+    lines = lines.sublist(1);
 
-    List<String> header = lines[headerIndex].split(',');
-    int timeIndex = header.indexOf('_time');
-    int valueIndex = header.indexOf('_value');
-
-    if (timeIndex == -1 || valueIndex == -1) return spots;
-
-    // Procesar datos (líneas después del header)
-    for (int i = headerIndex + 1; i < lines.length; i++) {
-      String line = lines[i];
+    for (final line in lines) {
       if (line.trim().isEmpty) continue;
 
-      List<String> values = line.split(',');
-      // Validación básica de longitud para evitar crash
-      if (values.length <= timeIndex || values.length <= valueIndex) continue;
+      final values = line.split(',');
+      if (values.length <= valueIndex || values.length <= timeIndex) continue;
 
       try {
-        String timeString = values[timeIndex];
-        String valueString = values[valueIndex];
+        final timeString = values[timeIndex];
+        final valueString = values[valueIndex];
 
-        if (double.tryParse(valueString) != null) {
-          double y = double.parse(valueString);
-          DateTime time = DateTime.parse(timeString);
-          double x = time.millisecondsSinceEpoch.toDouble(); // Usamos timestamp como X
+        final y = double.tryParse(valueString);
+        if (y == null) continue;
 
-          spots.add((x, y));
-        }
+        final t = DateTime.tryParse(timeString);
+        if (t == null) continue;
+
+        final x = t.millisecondsSinceEpoch.toDouble();
+        spots.add((x, y));
       } catch (e) {
-        // Ignorar líneas corruptas
+        if (depu) Logger().e("Error parseando línea CSV: $e");
       }
     }
-    
+
     return spots;
   }
 
-  // --- MÉTODOS DE CACHÉ (Copia de http_service.dart) ---
+  /// Devuelve mapa timestamp->value desde caché (si no expiró) y filtrado por rango.
+  Map<double, double> _fetchCacheData({
+    required String key,
+    required double startTimestampMs,
+    required double endTimestampMs,
+    int? limit,
+  }) {
+    final ts = _cacheTimestamps[key];
+    if (ts == null) return {};
 
-  Map<double, double> _fetchCacheData(String key, double start, double end) {
-    if (!cache.containsKey(key) || 
-        DateTime.now().difference(cacheTimestamps[key] ?? DateTime(0)) > cacheExpiration) {
+    // expiración
+    if (DateTime.now().difference(ts) > cacheExpiration) {
+      _cache.remove(key);
+      _cacheTimestamps.remove(key);
+      if (cacheDepu) Logger().i("🧹 Cache expirado: $key");
       return {};
     }
 
-    var cachedData = cache[key]!;
-    var result = SplayTreeMap<double, double>();
+    final map = _cache[key];
+    if (map == null || map.isEmpty) return {};
 
-    var filteredEntries = cachedData.entries
-        .where((entry) => entry.key >= start && entry.key <= end);
+    // SplayTreeMap está ordenado por key (timestamp)
+    final result = <double, double>{};
 
-    for (var entry in filteredEntries) {
+    for (final entry in map.entries) {
+      if (entry.key < startTimestampMs) continue;
+      if (entry.key > endTimestampMs) break;
       result[entry.key] = entry.value;
     }
-    
+
+    if (limit != null && limit > 0 && result.length > limit) {
+      // deja los últimos N
+      final keys = result.keys.toList(growable: false);
+      final slice = keys.sublist(keys.length - limit);
+      return {for (final k in slice) k: result[k]!};
+    }
+
     return result;
   }
 
   Future<void> _updateCache(String key, List<(double, double)> newData) async {
-    if (!cache.containsKey(key)) {
-      cache[key] = SplayTreeMap<double, double>();
+    _cache.putIfAbsent(key, () => SplayTreeMap<double, double>());
+    final map = _cache[key]!;
+    for (final p in newData) {
+      map[p.$1] = p.$2;
     }
-    for (var point in newData) {
-      cache[key]![point.$1] = point.$2;
-    }
-    cacheTimestamps[key] = DateTime.now();
+    _cacheTimestamps[key] = DateTime.now();
   }
 
   void disconnect() {
