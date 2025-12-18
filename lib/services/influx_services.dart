@@ -2,8 +2,6 @@ import 'package:influxdb_client/api.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 
-
-
 class InfluxService {
   //final String url = "https://qartia.com/api/v2/query";
   final String url = "http://31.222.232.41:8086";
